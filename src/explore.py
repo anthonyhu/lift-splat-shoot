@@ -19,7 +19,7 @@ from .models import compile_model
 
 
 def lidar_check(version,
-                dataroot='/data/nuscenes',
+                dataroot='/data/cvfs/ah2029/datasets/nuscenes',
                 show_lidar=True,
                 viz_train=False,
                 nepochs=1,
@@ -37,8 +37,11 @@ def lidar_check(version,
                 dbound=[4.0, 45.0, 1.0],
 
                 bsz=1,
-                nworkers=10,
+                nworkers=6,
                 ):
+    if torch.cuda.device_count() == 8:
+        dataroot = '/mnt/local/datasets/nuscenes'
+
     grid_conf = {
         'xbound': xbound,
         'ybound': ybound,
@@ -117,8 +120,8 @@ def lidar_check(version,
 
 
 def cumsum_check(version,
-                dataroot='/data/nuscenes',
-                gpuid=1,
+                dataroot='/data/cvfs/ah2029/datasets/nuscenes',
+                gpuid=0,
 
                 H=900, W=1600,
                 resize_lim=(0.193, 0.225),
@@ -133,8 +136,11 @@ def cumsum_check(version,
                 dbound=[4.0, 45.0, 1.0],
 
                 bsz=4,
-                nworkers=10,
+                nworkers=6,
                 ):
+
+    if torch.cuda.device_count() == 8:
+        dataroot = '/mnt/local/datasets/nuscenes'
     grid_conf = {
         'xbound': xbound,
         'ybound': ybound,
@@ -192,9 +198,9 @@ def cumsum_check(version,
 
 
 def eval_model_iou(version,
-                modelf,
-                dataroot='/data/nuscenes',
-                gpuid=1,
+                modelf='./model_weights/model525000.pt',
+                dataroot='/data/cvfs/ah2029/datasets/nuscenes',
+                gpuid=0,
 
                 H=900, W=1600,
                 resize_lim=(0.193, 0.225),
@@ -209,8 +215,12 @@ def eval_model_iou(version,
                 dbound=[4.0, 45.0, 1.0],
 
                 bsz=4,
-                nworkers=10,
+                nworkers=6,
                 ):
+
+    if torch.cuda.device_count() == 8:
+        dataroot = '/mnt/local/datasets/nuscenes'
+
     grid_conf = {
         'xbound': xbound,
         'ybound': ybound,
@@ -249,9 +259,9 @@ def eval_model_iou(version,
 
 
 def viz_model_preds(version,
-                    modelf,
-                    dataroot='/data/nuscenes',
-                    gpuid=1,
+                    modelf='model_weights/model525000.pt',
+                    dataroot='/data/cvfs/ah2029/datasets/nuscenes',
+                    gpuid=0,
                     viz_train=False,
 
                     H=900, W=1600,
@@ -267,8 +277,11 @@ def viz_model_preds(version,
                     dbound=[4.0, 45.0, 1.0],
 
                     bsz=4,
-                    nworkers=10,
+                    nworkers=6,
                     ):
+    if torch.cuda.device_count() == 8:
+        dataroot = '/mnt/local/datasets/nuscenes'
+
     map_folder = dataroot
     grid_conf = {
         'xbound': xbound,

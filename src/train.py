@@ -15,7 +15,7 @@ from .data import compile_data
 from .tools import SimpleLoss, get_batch_iou, get_val_info
 
 MODEL_NAME = 'temporal'
-BATCH_SIZE = 1
+BATCH_SIZE = 2
 
 RAND_FLIP = False  # True for basic
 NCAMS = 6  # 5 for basic
@@ -32,9 +32,9 @@ SEQUENCE_LENGTH = MODEL_CONFIG['receptive_field'] + MODEL_CONFIG['n_future']
 
 
 def train(version,
-            dataroot='/data/nuscenes',
+            dataroot='/data/cvfs/ah2029/datasets/nuscenes',
             nepochs=10000,
-            gpuid=1,
+            gpuid=0,
 
             H=900, W=1600,
             resize_lim=(0.193, 0.225),
@@ -53,10 +53,13 @@ def train(version,
             dbound=[4.0, 45.0, 1.0],
 
             bsz=BATCH_SIZE,
-            nworkers=10,
+            nworkers=6,
             lr=1e-3,
             weight_decay=1e-7,
             ):
+    if torch.cuda.device_count() == 8:
+        dataroot = '/mnt/local/datasets/nuscenes'
+
     grid_conf = {
         'xbound': xbound,
         'ybound': ybound,
