@@ -246,11 +246,14 @@ class SequentialSegmentationData(SegmentationData):
 
         previous_rec = None
         for t in range(self.sequence_length):
-            rec = self.ixes[index + t]
-
-            if (previous_rec is not None) and (rec['scene_token'] != previous_rec['scene_token']):
-                # Repeat image
+            if index + t >= len(self):
                 rec = previous_rec
+            else:
+                rec = self.ixes[index + t]
+
+                if (previous_rec is not None) and (rec['scene_token'] != previous_rec['scene_token']):
+                    # Repeat image
+                    rec = previous_rec
 
             imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
             binimg = self.get_binimg(rec)

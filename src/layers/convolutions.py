@@ -4,7 +4,7 @@ from functools import partial
 import torch.nn as nn
 import torch.nn.functional as F
 
-from layers.base import Interpolate
+from src.layers.base import Interpolate
 
 
 class ConvBlock(nn.Module):

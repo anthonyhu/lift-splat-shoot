@@ -14,6 +14,19 @@ from .models import compile_model
 from .data import compile_data
 from .tools import SimpleLoss, get_batch_iou, get_val_info
 
+MODEL_NAME = 'temporal'
+BATCH_SIZE = 1
+
+RAND_FLIP = False  # True for basic
+NCAMS = 6  # 5 for basic
+MODEL_CONFIG = {'receptive_field': 2,
+                'n_future': 1,
+                'latent_dim': 1,
+                'action_as_input': False,
+                'temporal_model_name': 'gru',
+                }
+SEQUENCE_LENGTH = MODEL_CONFIG['receptive_field'] + MODEL_CONFIG['n_future']
+
 
 def train(version,
             dataroot='/data/nuscenes',
@@ -25,8 +38,8 @@ def train(version,
             final_dim=(128, 352),
             bot_pct_lim=(0.0, 0.22),
             rot_lim=(-5.4, 5.4),
-            rand_flip=True,
-            ncams=5,
+            rand_flip=RAND_FLIP,
+            ncams=NCAMS,
             max_grad_norm=5.0,
             pos_weight=2.13,
             logdir='./runs',
@@ -36,7 +49,7 @@ def train(version,
             zbound=[-10.0, 10.0, 20.0],
             dbound=[4.0, 45.0, 1.0],
 
-            bsz=4,
+            bsz=BATCH_SIZE,
             nworkers=10,
             lr=1e-3,
             weight_decay=1e-7,
@@ -58,13 +71,18 @@ def train(version,
                              'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT'],
                     'Ncams': ncams,
                 }
+
+    if MODEL_NAME == 'temporal':
+        parser_name = 'sequentialsegmentationdata'
+    else:
+        parser_name = 'segmentationdata'
     trainloader, valloader = compile_data(version, dataroot, data_aug_conf=data_aug_conf,
                                           grid_conf=grid_conf, bsz=bsz, nworkers=nworkers,
-                                          parser_name='segmentationdata')
+                                          parser_name=parser_name, sequence_length=SEQUENCE_LENGTH)
 
     device = torch.device('cpu') if gpuid < 0 else torch.device(f'cuda:{gpuid}')
 
-    model = compile_model(grid_conf, data_aug_conf, outC=1)
+    model = compile_model(grid_conf, data_aug_conf, outC=1, name=MODEL_NAME, model_config=MODEL_CONFIG)
     model.to(device)
 
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -72,7 +90,7 @@ def train(version,
     loss_fn = SimpleLoss(pos_weight).cuda(gpuid)
 
     writer = SummaryWriter(logdir=logdir)
-    val_step = 1000 if version == 'mini' else 10000
+    val_step = 10000 if version == 'mini' else 10000
 
     model.train()
     counter = 0
@@ -89,6 +107,14 @@ def train(version,
                     post_trans.to(device),
                     )
             binimgs = binimgs.to(device)
+
+            if MODEL_NAME == 'temporal':
+                binimgs = binimgs[:, (model.receptive_field - 1):].contiguous()
+
+                # Pack sequence dimension
+                preds = model.pack_sequence_dim(preds).contiguous()
+                binimgs = model.pack_sequence_dim(binimgs).contiguous()
+
             loss = loss_fn(preds, binimgs)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
@@ -105,6 +131,7 @@ def train(version,
                 writer.add_scalar('train/iou', iou, counter)
                 writer.add_scalar('train/epoch', epoch, counter)
                 writer.add_scalar('train/step_time', t1 - t0, counter)
+                print(f'train iou: {iou}')
 
             if counter % val_step == 0:
                 val_info = get_val_info(model, valloader, loss_fn, device)

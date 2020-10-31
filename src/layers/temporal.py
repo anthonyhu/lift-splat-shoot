@@ -3,7 +3,7 @@ from collections import OrderedDict
 import torch
 import torch.nn as nn
 
-from layers.convolutions import ConvBlock
+from src.layers.convolutions import ConvBlock
 
 
 class SpatialGRU(nn.Module):
