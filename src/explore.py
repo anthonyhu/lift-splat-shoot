@@ -230,7 +230,8 @@ def eval_model_iou(version,
                 }
     trainloader, valloader = compile_data(version, dataroot, data_aug_conf=data_aug_conf,
                                           grid_conf=grid_conf, bsz=bsz, nworkers=nworkers,
-                                          parser_name='segmentationdata')
+                                          parser_name='sequentialsegmentationdata',
+                                          sequence_length=6)
 
     device = torch.device('cpu') if gpuid < 0 else torch.device(f'cuda:{gpuid}')
 
@@ -242,7 +243,8 @@ def eval_model_iou(version,
     loss_fn = SimpleLoss(1.0).cuda(gpuid)
 
     model.eval()
-    val_info = get_val_info(model, valloader, loss_fn, device)
+    val_info = get_val_info(model, valloader, loss_fn, device, is_temporal=False, repeat_baseline=True,
+                            receptive_field=3)
     print(val_info)
 
 

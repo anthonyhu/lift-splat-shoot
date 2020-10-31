@@ -251,6 +251,15 @@ class LiftSplatShoot(nn.Module):
 
         return x
 
+    @staticmethod
+    def pack_sequence_dim(x):
+        b, s = x.shape[:2]
+        return x.view(b * s, *x.shape[2:])
+
+    @staticmethod
+    def unpack_sequence_dim(x, b, s):
+        return x.view(b, s, *x.shape[1:])
+
     def forward(self, x, rots, trans, intrins, post_rots, post_trans):
         x = self.get_voxels(x, rots, trans, intrins, post_rots, post_trans)
         x = self.bevencode(x)
@@ -363,23 +372,25 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         self.latent_dim = model_config['latent_dim']  # 16
         self.action_as_input = model_config['action_as_input']  # False
         self.temporal_model_name = model_config['temporal_model_name']  # gru
+        self.start_out_channels = model_config['start_out_channels']  # 80
+        self.extra_in_channels = model_config['extra_in_channels']  # 8
+        self.use_pyramid_pooling = model_config['use_pyramid_pooling']  # False
 
         self.temporal_model = TemporalModel(
             in_channels=self.camC, receptive_field=self.receptive_field, name=self.temporal_model_name,
         )
 
+        if self.temporal_model_name == 'gru':
+            future_pred_in_channels = self.camC
+        else:
+            future_pred_in_channels = (self.start_out_channels
+                                       + self.extra_in_channels * (self.receptive_field - 2))
+
         self.future_prediction = FuturePrediction(
-            in_channels=self.camC, latent_dim=self.latent_dim, action_as_input=self.action_as_input,
+            in_channels=future_pred_in_channels, latent_dim=self.latent_dim, action_as_input=self.action_as_input,
         )
 
-    @staticmethod
-    def pack_sequence_dim(x):
-        b, s = x.shape[:2]
-        return x.view(b * s, *x.shape[2:])
-
-    @staticmethod
-    def unpack_sequence_dim(x, b, s):
-        return x.view(b, s, *x.shape[1:])
+        self.bevencode = BevEncode(inC=future_pred_in_channels, outC=outC)
 
     def forward(self, imgs, rots, trans, intrins, post_rots, post_trans):
         b, s, n, c, h, w = imgs.shape

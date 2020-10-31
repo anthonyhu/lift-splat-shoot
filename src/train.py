@@ -19,11 +19,14 @@ BATCH_SIZE = 1
 
 RAND_FLIP = False  # True for basic
 NCAMS = 6  # 5 for basic
-MODEL_CONFIG = {'receptive_field': 2,
-                'n_future': 1,
+MODEL_CONFIG = {'receptive_field': 3,
+                'n_future': 3,
                 'latent_dim': 1,
                 'action_as_input': False,
-                'temporal_model_name': 'gru',
+                'temporal_model_name': 'temporal_block',
+                'start_out_channels': 80,
+                'extra_in_channels': 8,
+                'use_pyramid_pooling': False,
                 }
 SEQUENCE_LENGTH = MODEL_CONFIG['receptive_field'] + MODEL_CONFIG['n_future']
 
@@ -90,58 +93,66 @@ def train(version,
     loss_fn = SimpleLoss(pos_weight).cuda(gpuid)
 
     writer = SummaryWriter(logdir=logdir)
-    val_step = 10000 if version == 'mini' else 10000
+    val_step = 50 if version == 'mini' else 10000
 
     model.train()
     counter = 0
     for epoch in range(nepochs):
         np.random.seed()
         for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, binimgs) in enumerate(trainloader):
-            t0 = time()
-            opt.zero_grad()
-            preds = model(imgs.to(device),
-                    rots.to(device),
-                    trans.to(device),
-                    intrins.to(device),
-                    post_rots.to(device),
-                    post_trans.to(device),
-                    )
-            binimgs = binimgs.to(device)
+            counter = train_step(imgs, rots, trans, intrins, post_rots, post_trans, binimgs, opt, model, device,
+                                 loss_fn, max_grad_norm, writer, epoch, valloader, val_step, logdir, counter)
 
-            if MODEL_NAME == 'temporal':
-                binimgs = binimgs[:, (model.receptive_field - 1):].contiguous()
 
-                # Pack sequence dimension
-                preds = model.pack_sequence_dim(preds).contiguous()
-                binimgs = model.pack_sequence_dim(binimgs).contiguous()
+def train_step(imgs, rots, trans, intrins, post_rots, post_trans, binimgs, opt, model, device, loss_fn, max_grad_norm,
+               writer, epoch, valloader, val_step, logdir, counter):
+    t0 = time()
+    opt.zero_grad()
+    preds = model(imgs.to(device),
+                  rots.to(device),
+                  trans.to(device),
+                  intrins.to(device),
+                  post_rots.to(device),
+                  post_trans.to(device),
+                  )
+    binimgs = binimgs.to(device)
 
-            loss = loss_fn(preds, binimgs)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
-            opt.step()
-            counter += 1
-            t1 = time()
+    if MODEL_NAME == 'temporal':
+        binimgs = binimgs[:, (model.receptive_field - 1):].contiguous()
 
-            if counter % 10 == 0:
-                print(counter, loss.item())
-                writer.add_scalar('train/loss', loss, counter)
+        #  Pack sequence dimension
+        preds = model.pack_sequence_dim(preds).contiguous()
+        binimgs = model.pack_sequence_dim(binimgs).contiguous()
 
-            if counter % 50 == 0:
-                _, _, iou = get_batch_iou(preds, binimgs)
-                writer.add_scalar('train/iou', iou, counter)
-                writer.add_scalar('train/epoch', epoch, counter)
-                writer.add_scalar('train/step_time', t1 - t0, counter)
-                print(f'train iou: {iou}')
+    loss = loss_fn(preds, binimgs)
+    loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+    opt.step()
+    counter += 1
+    t1 = time()
 
-            if counter % val_step == 0:
-                val_info = get_val_info(model, valloader, loss_fn, device)
-                print('VAL', val_info)
-                writer.add_scalar('val/loss', val_info['loss'], counter)
-                writer.add_scalar('val/iou', val_info['iou'], counter)
+    if counter % 10 == 0:
+        print(counter, loss.item())
+        writer.add_scalar('train/loss', loss, counter)
 
-            if counter % val_step == 0:
-                model.eval()
-                mname = os.path.join(logdir, "model{}.pt".format(counter))
-                print('saving', mname)
-                torch.save(model.state_dict(), mname)
-                model.train()
+    if counter % 50 == 0:
+        _, _, iou = get_batch_iou(preds, binimgs)
+        writer.add_scalar('train/iou', iou, counter)
+        writer.add_scalar('train/epoch', epoch, counter)
+        writer.add_scalar('train/step_time', t1 - t0, counter)
+        print(f'train iou: {iou}')
+
+    if counter % val_step == 0:
+        val_info = get_val_info(model, valloader, loss_fn, device, is_temporal=(MODEL_NAME == 'temporal'))
+        print('VAL', val_info)
+        writer.add_scalar('val/loss', val_info['loss'], counter)
+        writer.add_scalar('val/iou', val_info['iou'], counter)
+
+    if counter % val_step == 0:
+        model.eval()
+        mname = os.path.join(logdir, "model{}.pt".format(counter))
+        print('saving', mname)
+        torch.save(model.state_dict(), mname)
+        model.train()
+
+    return counter

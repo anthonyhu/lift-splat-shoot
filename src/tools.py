@@ -240,7 +240,8 @@ def get_batch_iou(preds, binimgs):
     return intersect, union, intersect / union if (union > 0) else 1.0
 
 
-def get_val_info(model, valloader, loss_fn, device, use_tqdm=False):
+def get_val_info(model, valloader, loss_fn, device, use_tqdm=False, is_temporal=False, repeat_baseline=False,
+                 receptive_field=0):
     model.eval()
     total_loss = 0.0
     total_intersect = 0.0
@@ -250,10 +251,41 @@ def get_val_info(model, valloader, loss_fn, device, use_tqdm=False):
     with torch.no_grad():
         for batch in loader:
             allimgs, rots, trans, intrins, post_rots, post_trans, binimgs = batch
+
+            if repeat_baseline:
+                b, s, n, c, h, w = allimgs.shape
+                # Reshape
+                allimgs = model.pack_sequence_dim(allimgs)
+                rots = model.pack_sequence_dim(rots)
+                trans = model.pack_sequence_dim(trans)
+                intrins = model.pack_sequence_dim(intrins)
+                post_rots = model.pack_sequence_dim(post_rots)
+                post_trans = model.pack_sequence_dim(post_trans)
+
             preds = model(allimgs.to(device), rots.to(device),
                           trans.to(device), intrins.to(device), post_rots.to(device),
                           post_trans.to(device))
             binimgs = binimgs.to(device)
+
+            if repeat_baseline:
+                preds = model.unpack_sequence_dim(preds, b, s)
+
+                binimgs = binimgs[:, (receptive_field - 1):].contiguous()
+                preds = preds[:, (receptive_field - 1):].contiguous()
+
+                # Repeat first prediction
+                preds[:, 1:] = preds[:, :1]
+
+                #  Pack sequence dimension
+                preds = model.pack_sequence_dim(preds).contiguous()
+                binimgs = model.pack_sequence_dim(binimgs).contiguous()
+
+            if is_temporal:
+                binimgs = binimgs[:, (model.receptive_field - 1):].contiguous()
+
+                #  Pack sequence dimension
+                preds = model.pack_sequence_dim(preds).contiguous()
+                binimgs = model.pack_sequence_dim(binimgs).contiguous()
 
             # loss
             total_loss += loss_fn(preds, binimgs).item() * preds.shape[0]
