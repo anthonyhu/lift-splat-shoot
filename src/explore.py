@@ -249,7 +249,6 @@ def eval_model_iou(version,
 def viz_model_preds(version,
                     modelf,
                     dataroot='/data/nuscenes',
-                    map_folder='/data/nuscenes/mini',
                     gpuid=1,
                     viz_train=False,
 
@@ -268,6 +267,7 @@ def viz_model_preds(version,
                     bsz=4,
                     nworkers=10,
                     ):
+    map_folder = dataroot
     grid_conf = {
         'xbound': xbound,
         'ybound': ybound,
@@ -348,7 +348,8 @@ def viz_model_preds(version,
                     mpatches.Patch(color='#76b900', label='Ego Vehicle'),
                     mpatches.Patch(color=(1.00, 0.50, 0.31, 0.8), label='Map (for visualization purposes only)')
                 ], loc=(0.01, 0.86))
-                plt.imshow(out[si].squeeze(0), vmin=0, vmax=1, cmap='Blues')
+                #plt.imshow(out[si].squeeze(0), vmin=0, vmax=1, cmap='Blues')
+                plt.imshow(binimgs[si].squeeze(0), vmin=0, vmax=1, cmap='Blues')
 
                 # plot static map (improves visualization)
                 rec = loader.dataset.ixes[counter]

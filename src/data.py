@@ -19,11 +19,12 @@ from .tools import get_lidar_data, img_transform, normalize_img, gen_dx_bx
 
 
 class NuscData(torch.utils.data.Dataset):
-    def __init__(self, nusc, is_train, data_aug_conf, grid_conf):
+    def __init__(self, nusc, is_train, data_aug_conf, grid_conf, sequence_length=0):
         self.nusc = nusc
         self.is_train = is_train
         self.data_aug_conf = data_aug_conf
         self.grid_conf = grid_conf
+        self.sequence_length = sequence_length
 
         self.scenes = self.get_scenes()
         self.ixes = self.prepro()
@@ -237,23 +238,61 @@ class SegmentationData(NuscData):
         return imgs, rots, trans, intrins, post_rots, post_trans, binimg
 
 
+class SequentialSegmentationData(SegmentationData):
+    def __getitem__(self, index):
+        list_imgs, list_rots, list_trans, list_intrins = [], [], [], []
+        list_post_rots, list_post_trans, list_binimg = [], [], []
+        cams = self.choose_cams()
+
+        previous_rec = None
+        for t in range(self.sequence_length):
+            rec = self.ixes[index + t]
+
+            if (previous_rec is not None) and (rec['scene_token'] != previous_rec['scene_token']):
+                # Repeat image
+                rec = previous_rec
+
+            imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
+            binimg = self.get_binimg(rec)
+
+            list_imgs.append(imgs)
+            list_rots.append(rots)
+            list_trans.append(trans)
+            list_intrins.append(intrins)
+            list_post_rots.append(post_rots)
+            list_post_trans.append(post_trans)
+            list_binimg.append(binimg)
+
+            previous_rec = rec
+
+        list_imgs, list_rots, list_trans, list_intrins = torch.stack(list_imgs), torch.stack(list_rots), \
+                                                         torch.stack(list_trans), torch.stack(list_intrins)
+
+        list_post_rots, list_post_trans, list_binimg = torch.stack(list_post_rots), torch.stack(list_post_trans), \
+                                                       torch.stack(list_binimg)
+
+        return list_imgs, list_rots, list_trans, list_intrins, list_post_rots, list_post_trans, list_binimg
+
+
 def worker_rnd_init(x):
     np.random.seed(13 + x)
 
 
 def compile_data(version, dataroot, data_aug_conf, grid_conf, bsz,
-                 nworkers, parser_name):
-    nusc = NuScenes(version='v1.0-{}'.format(version),
-                    dataroot=os.path.join(dataroot, version),
+                 nworkers, parser_name, sequence_length=6):
+    version = 'v1.0-{}'.format(version)
+    nusc = NuScenes(version=version,
+                    dataroot=dataroot,
                     verbose=False)
     parser = {
         'vizdata': VizData,
         'segmentationdata': SegmentationData,
+        'sequentialsegmentationdata': SequentialSegmentationData,
     }[parser_name]
     traindata = parser(nusc, is_train=True, data_aug_conf=data_aug_conf,
-                         grid_conf=grid_conf)
+                         grid_conf=grid_conf, sequence_length=sequence_length)
     valdata = parser(nusc, is_train=False, data_aug_conf=data_aug_conf,
-                       grid_conf=grid_conf)
+                       grid_conf=grid_conf, sequence_length=sequence_length)
 
     trainloader = torch.utils.data.DataLoader(traindata, batch_size=bsz,
                                               shuffle=True,
