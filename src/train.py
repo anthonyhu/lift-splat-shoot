@@ -16,6 +16,7 @@ from .tools import SimpleLoss, get_batch_iou, get_val_info
 
 MODEL_NAME = 'temporal'
 BATCH_SIZE = 2
+LEARNING_RATE = 1e-3
 
 RAND_FLIP = False  # True for basic
 NCAMS = 6  # 5 for basic
@@ -54,7 +55,7 @@ def train(version,
 
             bsz=BATCH_SIZE,
             nworkers=6,
-            lr=1e-3,
+            lr=LEARNING_RATE,
             weight_decay=1e-7,
             ):
     if torch.cuda.device_count() == 8:
@@ -143,7 +144,7 @@ def train_step(imgs, rots, trans, intrins, post_rots, post_trans, binimgs, opt, 
         writer.add_scalar('train/iou', iou, counter)
         writer.add_scalar('train/epoch', epoch, counter)
         writer.add_scalar('train/step_time', t1 - t0, counter)
-        print(f'train iou: {iou}')
+        print(f'step time: {t1 - t0}, train iou: {iou}')
 
     if counter % val_step == 0:
         val_info = get_val_info(model, valloader, loss_fn, device, is_temporal=(MODEL_NAME == 'temporal'))
