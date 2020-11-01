@@ -17,7 +17,7 @@ from .data import compile_data
 from .tools import get_batch_iou, compute_miou, get_val_info
 from .utils import print_model_spec, set_module_grad
 
-BATCH_SIZE = 2
+BATCH_SIZE = 24
 TAG = 'debug'
 OUTPUT_PATH = './runs/baseline'
 
@@ -134,7 +134,7 @@ def train(version,
     loss_fn = torch.nn.CrossEntropyLoss(weight=torch.Tensor(weight)).to(device)
 
     writer = SummaryWriter(logdir=logdir)
-    val_step = 20 if version == 'mini' else 5000
+    val_step = 20 if version == 'mini' else 10000
 
     model.train()
     counter = 0
