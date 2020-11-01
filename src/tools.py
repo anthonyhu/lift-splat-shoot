@@ -446,9 +446,15 @@ def get_local_map(nmap, center, stretch, layer_names, line_names):
 
 
 def save_static_labels(dataroot='/data/cvfs/ah2029/datasets/nuscenes', version='mini'):
-    import os
     from src.data import SegmentationData
     from nuscenes.nuscenes import NuScenes
+    from time import time
+    from tqdm import tqdm
+    from multiprocessing import Pool, cpu_count
+    from functools import partial
+
+    t0 = time()
+    dataroot = os.path.join(dataroot, version)
     nusc = NuScenes(version='v1.0-{}'.format(version),
                     dataroot=dataroot,
                     verbose=False)
@@ -483,17 +489,31 @@ def save_static_labels(dataroot='/data/cvfs/ah2029/datasets/nuscenes', version='
         'Ncams': 5,
     }
 
-    val_dataset = SegmentationData(nusc, is_train=False, data_aug_conf=data_aug_conf, grid_conf=grid_conf,
+    pool = Pool(cpu_count() - 1)
+    for is_train in [True, False]:
+        dataset = SegmentationData(nusc, is_train=is_train, data_aug_conf=data_aug_conf, grid_conf=grid_conf,
                                    sequence_length=6, map_labels=True,
                                    map_dataroot=dataroot)
-
-    for i in range(len(val_dataset)):
-        imgs, rots, trans, intrins, post_rots, post_trans, binimg = val_dataset[i]
-
-        output_path = os.path.join(dataroot, version, 'bev_label')
-        os.makedirs(output_path, exist_ok=True)
-        label_path = os.path.join(output_path, f'bev_label_{i:08d}.png')
-        binimg = Image.fromarray(binimg.numpy().astype(np.int32), mode='I')
-        binimg.save(label_path)
+        for _ in tqdm(
+                pool.imap_unordered(
+                    partial(save_static_label_iter, dataset=dataset, dataroot=dataroot),
+                    range(len(dataset)),
+                ),
+                total=len(dataset)
+        ):
+            pass
 
         # binimg_opened = np.asarray(Image.open(label_path)).astype(np.int64)
+
+    t1 = time()
+    print(f'Saving the labels took: {(t1 - t0) / 60}mins')
+
+
+def save_static_label_iter(i, dataset, dataroot):
+    imgs, rots, trans, intrins, post_rots, post_trans, binimg = dataset[i]
+
+    output_path = os.path.join(dataroot, 'bev_label')
+    os.makedirs(output_path, exist_ok=True)
+    label_path = os.path.join(output_path, f'bev_label_{i:08d}.png')
+    binimg = Image.fromarray(binimg.numpy().astype(np.int32), mode='I')
+    binimg.save(label_path)

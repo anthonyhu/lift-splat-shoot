@@ -176,7 +176,7 @@ def train_step(imgs, rots, trans, intrins, post_rots, post_trans, binimgs, opt, 
         print(f'Iteration {counter}, loss={loss.item()}, step time ={t1 - t0}')
         writer.add_scalar('train/loss', loss, counter)
 
-    if counter % 20 == 0:
+    if counter % 50 == 0:
         #_, _, iou = get_batch_iou(preds, binimgs.unsqueeze(1))
         miou = compute_miou((torch.argmax(preds, dim=1)).float().detach().cpu().numpy(), binimgs.cpu().numpy())
         iou = miou['vehicles']
