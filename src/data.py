@@ -3,28 +3,46 @@ Copyright (C) 2020 NVIDIA Corporation.  All rights reserved.
 Licensed under the NVIDIA Source Code License. See LICENSE at https://github.com/nv-tlabs/lift-splat-shoot.
 Authors: Jonah Philion and Sanja Fidler
 """
+import matplotlib
+matplotlib.use('Agg')
 
 import torch
 import os
 import numpy as np
 from PIL import Image
 import cv2
+import matplotlib.pyplot as plt
+
 from pyquaternion import Quaternion
 from nuscenes.nuscenes import NuScenes
 from nuscenes.utils.splits import create_splits_scenes
 from nuscenes.utils.data_classes import Box
 from glob import glob
 
-from .tools import get_lidar_data, img_transform, normalize_img, gen_dx_bx
+from .tools import get_lidar_data, img_transform, normalize_img, gen_dx_bx, get_nusc_maps, get_local_map
+from .utils import convert_figure_numpy
 
 
 class NuscData(torch.utils.data.Dataset):
-    def __init__(self, nusc, is_train, data_aug_conf, grid_conf, sequence_length=0):
+    def __init__(self, nusc, is_train, data_aug_conf, grid_conf, sequence_length=0, map_labels=False,
+                 map_dataroot=''):
         self.nusc = nusc
         self.is_train = is_train
         self.data_aug_conf = data_aug_conf
         self.grid_conf = grid_conf
         self.sequence_length = sequence_length
+        self.map_labels = map_labels
+
+        if map_labels:
+            self.nusc_maps = get_nusc_maps(map_dataroot)
+            scene2map = {}
+            for rec in self.nusc.scene:
+                log = self.nusc.get('log', rec['log_token'])
+                scene2map[rec['name']] = log['location']
+            self.scene2map = scene2map
+
+            self.driveable_area_id = 2
+            self.line_markings_id = 3
 
         self.scenes = self.get_scenes()
         self.ixes = self.prepro()
@@ -193,6 +211,77 @@ class NuscData(torch.utils.data.Dataset):
 
         return torch.Tensor(img).long()
 
+    def get_static_label(self, rec):
+        dpi = 100
+        height, width = (200, 200)
+        driveable_area_color = (1.00, 0.50, 0.31)
+        line_markings_color = (159. / 255., 0.0, 1.0)
+
+        poly_names = ['road_segment', 'lane']
+        line_names = ['road_divider', 'lane_divider']
+
+        dx, bx = self.dx[:2], self.bx[:2]
+
+        egopose = self.nusc.get('ego_pose', self.nusc.get('sample_data', rec['data']['LIDAR_TOP'])['ego_pose_token'])
+        map_name = self.scene2map[self.nusc.get('scene', rec['scene_token'])['name']]
+
+        rot = Quaternion(egopose['rotation']).rotation_matrix
+        rot = np.arctan2(rot[1, 0], rot[0, 0])
+        center = np.array([egopose['translation'][0], egopose['translation'][1], np.cos(rot), np.sin(rot)])
+
+        lmap = get_local_map(self.nusc_maps[map_name], center,
+                             50.0, poly_names, line_names)
+
+        label = np.zeros((height, width), dtype=np.int64)
+
+        # Driveable area
+        fig = plt.figure(dpi=dpi)
+        ax = fig.gca()
+        ax.set_axis_off()
+
+        for name in poly_names:
+            for la in lmap[name]:
+                pts = (la - bx) / dx
+                ax.fill(pts[:, 1], pts[:, 0], c=driveable_area_color)
+
+        ax.set_xlim((width, 0))
+        ax.set_ylim((0, height))
+        fig.subplots_adjust(left=0, right=1, top=1, bottom=0, wspace=0, hspace=0)
+        fig.set_figwidth(height / dpi)
+        fig.set_figheight(width / dpi)
+
+        plt.draw()
+        plt.close('all')
+
+        fig_np = convert_figure_numpy(fig)
+
+        label[fig_np.sum(axis=2) < 255 * 3] = self.driveable_area_id
+
+        # Line markings
+        fig = plt.figure(dpi=dpi)
+        ax = fig.gca()
+        ax.set_axis_off()
+
+        for name in line_names:
+            for la in lmap[name]:
+                pts = (la - bx) / dx
+                ax.plot(pts[:, 1], pts[:, 0], c=line_markings_color)
+
+        ax.set_xlim((width, 0))
+        ax.set_ylim((0, height))
+        fig.subplots_adjust(left=0, right=1, top=1, bottom=0, wspace=0, hspace=0)
+        fig.set_figwidth(height / dpi)
+        fig.set_figheight(width / dpi)
+
+        plt.draw()
+        plt.close('all')
+
+        fig_np = convert_figure_numpy(fig)
+
+        label[fig_np.sum(axis=2) < 255 * 3] = self.line_markings_id
+
+        return torch.Tensor(label).long()
+
     def choose_cams(self):
         if self.is_train and self.data_aug_conf['Ncams'] < len(self.data_aug_conf['cams']):
             cams = np.random.choice(self.data_aug_conf['cams'], self.data_aug_conf['Ncams'],
@@ -234,6 +323,11 @@ class SegmentationData(NuscData):
         cams = self.choose_cams()
         imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
         binimg = self.get_binimg(rec)
+        if self.map_labels:
+            static_label = self.get_static_label(rec)
+            # Add car labels
+            static_label[binimg == 1] = 1
+            binimg = static_label
         
         return imgs, rots, trans, intrins, post_rots, post_trans, binimg
 
@@ -257,6 +351,11 @@ class SequentialSegmentationData(SegmentationData):
 
             imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
             binimg = self.get_binimg(rec)
+            if self.map_labels:
+                static_label = self.get_static_label(rec)
+                # Add car labels
+                static_label[binimg == 1] = 1
+                binimg = static_label
 
             list_imgs.append(imgs)
             list_rots.append(rots)
@@ -282,7 +381,7 @@ def worker_rnd_init(x):
 
 
 def compile_data(version, dataroot, data_aug_conf, grid_conf, bsz,
-                 nworkers, parser_name, sequence_length=0):
+                 nworkers, parser_name, sequence_length=0, map_labels=False):
     if dataroot.startswith('/mnt/local'):
         dataroot = os.path.join(dataroot, version)
 
@@ -295,9 +394,11 @@ def compile_data(version, dataroot, data_aug_conf, grid_conf, bsz,
         'sequentialsegmentationdata': SequentialSegmentationData,
     }[parser_name]
     traindata = parser(nusc, is_train=True, data_aug_conf=data_aug_conf,
-                         grid_conf=grid_conf, sequence_length=sequence_length)
+                       grid_conf=grid_conf, sequence_length=sequence_length, map_labels=map_labels,
+                       map_dataroot=dataroot)
     valdata = parser(nusc, is_train=False, data_aug_conf=data_aug_conf,
-                       grid_conf=grid_conf, sequence_length=sequence_length)
+                     grid_conf=grid_conf, sequence_length=sequence_length, map_labels=map_labels,
+                     map_dataroot=dataroot)
 
     trainloader = torch.utils.data.DataLoader(traindata, batch_size=bsz,
                                               shuffle=True,

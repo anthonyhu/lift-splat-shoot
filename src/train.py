@@ -21,7 +21,8 @@ BATCH_SIZE = 2
 TAG = 'debug'
 OUTPUT_PATH = './runs/baseline'
 
-N_CLASSES = 2
+MAP_LABELS = True
+
 RAND_FLIP = False  # True for basic
 NCAMS = 6  # 5 for basic
 PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
@@ -37,6 +38,11 @@ MODEL_CONFIG = {'receptive_field': 3,
 SEQUENCE_LENGTH = MODEL_CONFIG['receptive_field'] + MODEL_CONFIG['n_future']
 MODEL_NAME = 'basic'
 LEARNING_RATE = 3e-4
+N_CLASSES = 2
+WEIGHT = [1.0, 2.13]
+if MAP_LABELS:
+    N_CLASSES = 4
+    WEIGHT = [1.0, 3.0, 1.0, 2.0]
 
 
 def train(version,
@@ -51,7 +57,7 @@ def train(version,
             rand_flip=RAND_FLIP,
             ncams=NCAMS,
             max_grad_norm=5.0,
-            weight=[1.0, 2.13],
+            weight=WEIGHT,
             tag=TAG,
             output_path=OUTPUT_PATH,
             xbound=[-50.0, 50.0, 0.5],
@@ -92,7 +98,8 @@ def train(version,
         parser_name = 'segmentationdata'
     trainloader, valloader = compile_data(version, dataroot, data_aug_conf=data_aug_conf,
                                           grid_conf=grid_conf, bsz=bsz, nworkers=nworkers,
-                                          parser_name=parser_name, sequence_length=SEQUENCE_LENGTH)
+                                          parser_name=parser_name, sequence_length=SEQUENCE_LENGTH,
+                                          map_labels=MAP_LABELS)
 
     device = torch.device('cuda:0')
 
