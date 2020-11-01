@@ -443,3 +443,57 @@ def get_local_map(nmap, center, stretch, layer_names, line_names):
             polys[layer_name][rowi] = np.dot(polys[layer_name][rowi], rot)
 
     return polys
+
+
+def save_static_labels(dataroot='/data/cvfs/ah2029/datasets/nuscenes', version='mini'):
+    import os
+    from src.data import SegmentationData
+    from nuscenes.nuscenes import NuScenes
+    nusc = NuScenes(version='v1.0-{}'.format(version),
+                    dataroot=dataroot,
+                    verbose=False)
+
+    H = 900
+    W = 1600
+    resize_lim = (0.193, 0.225)
+    final_dim = (128, 352)
+    bot_pct_lim = (0.0, 0.22)
+    rot_lim = (-5.4, 5.4)
+    rand_flip = False
+    xbound = [-50.0, 50.0, 0.5]
+    ybound = [-50.0, 50.0, 0.5]
+    zbound = [-10.0, 10.0, 20.0]
+    dbound = [4.0, 45.0, 1.0]
+    grid_conf = {
+        'xbound': xbound,
+        'ybound': ybound,
+        'zbound': zbound,
+        'dbound': dbound,
+    }
+    cams = ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT',
+            'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT']
+    data_aug_conf = {
+        'resize_lim': resize_lim,
+        'final_dim': final_dim,
+        'rot_lim': rot_lim,
+        'H': H, 'W': W,
+        'rand_flip': rand_flip,
+        'bot_pct_lim': bot_pct_lim,
+        'cams': cams,
+        'Ncams': 5,
+    }
+
+    val_dataset = SegmentationData(nusc, is_train=False, data_aug_conf=data_aug_conf, grid_conf=grid_conf,
+                                   sequence_length=6, map_labels=True,
+                                   map_dataroot=dataroot)
+
+    for i in range(len(val_dataset)):
+        imgs, rots, trans, intrins, post_rots, post_trans, binimg = val_dataset[i]
+
+        output_path = os.path.join(dataroot, version, 'bev_label')
+        os.makedirs(output_path, exist_ok=True)
+        label_path = os.path.join(output_path, f'bev_label_{i:08d}.png')
+        binimg = Image.fromarray(binimg.numpy().astype(np.int32), mode='I')
+        binimg.save(label_path)
+
+        # binimg_opened = np.asarray(Image.open(label_path)).astype(np.int64)

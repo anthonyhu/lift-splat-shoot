@@ -25,13 +25,14 @@ from .utils import convert_figure_numpy
 
 class NuscData(torch.utils.data.Dataset):
     def __init__(self, nusc, is_train, data_aug_conf, grid_conf, sequence_length=0, map_labels=False,
-                 map_dataroot=''):
+                 map_dataroot='', version=''):
         self.nusc = nusc
         self.is_train = is_train
         self.data_aug_conf = data_aug_conf
         self.grid_conf = grid_conf
         self.sequence_length = sequence_length
         self.map_labels = map_labels
+        self.version = version
 
         if map_labels:
             self.nusc_maps = get_nusc_maps(map_dataroot)
@@ -382,8 +383,7 @@ def worker_rnd_init(x):
 
 def compile_data(version, dataroot, data_aug_conf, grid_conf, bsz,
                  nworkers, parser_name, sequence_length=0, map_labels=False):
-    if dataroot.startswith('/mnt/local'):
-        dataroot = os.path.join(dataroot, version)
+    dataroot = os.path.join(dataroot, version)
 
     nusc = NuScenes(version='v1.0-{}'.format(version),
                     dataroot=dataroot,
@@ -395,10 +395,10 @@ def compile_data(version, dataroot, data_aug_conf, grid_conf, bsz,
     }[parser_name]
     traindata = parser(nusc, is_train=True, data_aug_conf=data_aug_conf,
                        grid_conf=grid_conf, sequence_length=sequence_length, map_labels=map_labels,
-                       map_dataroot=dataroot)
+                       map_dataroot=dataroot, version=version)
     valdata = parser(nusc, is_train=False, data_aug_conf=data_aug_conf,
                      grid_conf=grid_conf, sequence_length=sequence_length, map_labels=map_labels,
-                     map_dataroot=dataroot)
+                     map_dataroot=dataroot, version=version)
 
     trainloader = torch.utils.data.DataLoader(traindata, batch_size=bsz,
                                               shuffle=True,

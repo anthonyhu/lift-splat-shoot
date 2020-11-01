@@ -17,9 +17,9 @@ from .data import compile_data
 from .tools import get_batch_iou, compute_miou, get_val_info
 from .utils import print_model_spec, set_module_grad
 
-BATCH_SIZE = 24
+BATCH_SIZE = 1
 TAG = 'debug'
-OUTPUT_PATH = './runs/baseline'
+OUTPUT_PATH = './runs/4_classes'
 
 MAP_LABELS = True
 
@@ -30,13 +30,13 @@ MODEL_CONFIG = {'receptive_field': 3,
                 'n_future': 3,
                 'latent_dim': 1,
                 'action_as_input': False,
-                'temporal_model_name': 'gru',
+                'temporal_model_name': 'temporal_block',
                 'start_out_channels': 80,
                 'extra_in_channels': 8,
                 'use_pyramid_pooling': False,
                 }
 SEQUENCE_LENGTH = MODEL_CONFIG['receptive_field'] + MODEL_CONFIG['n_future']
-MODEL_NAME = 'basic'
+MODEL_NAME = 'temporal'
 LEARNING_RATE = 3e-4
 N_CLASSES = 2
 WEIGHT = [1.0, 2.13]
