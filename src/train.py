@@ -65,7 +65,7 @@ def train(version,
             weight_decay=1e-7,
             ):
     logdir = create_session_name(output_path, tag)
-    if torch.cuda.device_count() == 8:
+    if 'vm' in socket.gethostname():
         dataroot = '/mnt/local/datasets/nuscenes'
 
     grid_conf = {

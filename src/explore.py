@@ -3,7 +3,7 @@ Copyright (C) 2020 NVIDIA Corporation.  All rights reserved.
 Licensed under the NVIDIA Source Code License. See LICENSE at https://github.com/nv-tlabs/lift-splat-shoot.
 Authors: Jonah Philion and Sanja Fidler
 """
-
+import socket
 import torch
 import matplotlib as mpl
 mpl.use('Agg')
@@ -41,7 +41,7 @@ def lidar_check(version,
                 bsz=1,
                 nworkers=6,
                 ):
-    if torch.cuda.device_count() == 8:
+    if 'vm' in socket.gethostname():
         dataroot = '/mnt/local/datasets/nuscenes'
 
     grid_conf = {
@@ -140,7 +140,7 @@ def cumsum_check(version,
                 nworkers=6,
                 ):
 
-    if torch.cuda.device_count() == 8:
+    if 'vm' in socket.gethostname():
         dataroot = '/mnt/local/datasets/nuscenes'
     grid_conf = {
         'xbound': xbound,
@@ -218,7 +218,7 @@ def eval_model_iou(version,
                 nworkers=6,
                 ):
 
-    if torch.cuda.device_count() == 8:
+    if 'vm' in socket.gethostname():
         dataroot = '/mnt/local/datasets/nuscenes'
 
     grid_conf = {
@@ -278,7 +278,7 @@ def viz_model_preds(version,
                     bsz=4,
                     nworkers=6,
                     ):
-    if torch.cuda.device_count() == 8:
+    if 'vm' in socket.gethostname():
         dataroot = '/mnt/local/datasets/nuscenes'
 
     map_folder = dataroot
