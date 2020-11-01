@@ -17,6 +17,8 @@ from .tools import (ego_to_cam, get_only_in_img_mask, denormalize_img,
                     get_nusc_maps, plot_nusc_map)
 from .models import compile_model
 
+from .train import N_CLASSES
+
 
 def lidar_check(version,
                 dataroot='/data/cvfs/ah2029/datasets/nuscenes',
@@ -66,7 +68,7 @@ def lidar_check(version,
 
     loader = trainloader if viz_train else valloader
 
-    model = compile_model(grid_conf, data_aug_conf, outC=1)
+    model = compile_model(grid_conf, data_aug_conf, outC=N_CLASSES)
 
     rat = H / W
     val = 10.1
@@ -112,7 +114,7 @@ def lidar_check(version,
                 ax.set_aspect('equal')
 
                 ax = plt.subplot(gs[:, 4:5])
-                plt.imshow(binimgs[si].squeeze(0).T, origin='lower', cmap='Greys', vmin=0, vmax=1)
+                plt.imshow(binimgs[si].T, origin='lower', cmap='Greys', vmin=0, vmax=1)
 
                 imname = f'lcheck{epoch:03}_{batchi:05}_{si:02}.jpg'
                 print('saving', imname)
@@ -121,7 +123,6 @@ def lidar_check(version,
 
 def cumsum_check(version,
                 dataroot='/data/cvfs/ah2029/datasets/nuscenes',
-                gpuid=0,
 
                 H=900, W=1600,
                 resize_lim=(0.193, 0.225),
@@ -162,10 +163,10 @@ def cumsum_check(version,
                                           grid_conf=grid_conf, bsz=bsz, nworkers=nworkers,
                                           parser_name='segmentationdata')
 
-    device = torch.device('cpu') if gpuid < 0 else torch.device(f'cuda:{gpuid}')
+    device = torch.device(f'cuda:0')
     loader = trainloader
 
-    model = compile_model(grid_conf, data_aug_conf, outC=1)
+    model = compile_model(grid_conf, data_aug_conf, outC=N_CLASSES)
     model.to(device)
 
     model.eval()
@@ -200,7 +201,6 @@ def cumsum_check(version,
 def eval_model_iou(version,
                 modelf='./model_weights/model525000.pt',
                 dataroot='/data/cvfs/ah2029/datasets/nuscenes',
-                gpuid=0,
 
                 H=900, W=1600,
                 resize_lim=(0.193, 0.225),
@@ -243,14 +243,14 @@ def eval_model_iou(version,
                                           parser_name='sequentialsegmentationdata',
                                           sequence_length=6)
 
-    device = torch.device('cpu') if gpuid < 0 else torch.device(f'cuda:{gpuid}')
+    device = torch.device('cuda:0')
 
-    model = compile_model(grid_conf, data_aug_conf, outC=1)
+    model = compile_model(grid_conf, data_aug_conf, outC=N_CLASSES)
     print('loading', modelf)
     model.load_state_dict(torch.load(modelf))
     model.to(device)
 
-    loss_fn = SimpleLoss(1.0).cuda(gpuid)
+    loss_fn = torch.nn.CrossEntropyLoss().cuda()
 
     model.eval()
     val_info = get_val_info(model, valloader, loss_fn, device, is_temporal=False, repeat_baseline=True,
@@ -261,7 +261,6 @@ def eval_model_iou(version,
 def viz_model_preds(version,
                     modelf='model_weights/model525000.pt',
                     dataroot='/data/cvfs/ah2029/datasets/nuscenes',
-                    gpuid=0,
                     viz_train=False,
 
                     H=900, W=1600,
@@ -307,9 +306,9 @@ def viz_model_preds(version,
     loader = trainloader if viz_train else valloader
     nusc_maps = get_nusc_maps(map_folder)
 
-    device = torch.device('cpu') if gpuid < 0 else torch.device(f'cuda:{gpuid}')
+    device = torch.device(f'cuda:0')
 
-    model = compile_model(grid_conf, data_aug_conf, outC=1)
+    model = compile_model(grid_conf, data_aug_conf, outC=N_CLASSES)
     print('loading', modelf)
     model.load_state_dict(torch.load(modelf))
     model.to(device)
@@ -364,7 +363,7 @@ def viz_model_preds(version,
                     mpatches.Patch(color=(1.00, 0.50, 0.31, 0.8), label='Map (for visualization purposes only)')
                 ], loc=(0.01, 0.86))
                 #plt.imshow(out[si].squeeze(0), vmin=0, vmax=1, cmap='Blues')
-                plt.imshow(binimgs[si].squeeze(0), vmin=0, vmax=1, cmap='Blues')
+                plt.imshow(binimgs[si], vmin=0, vmax=1, cmap='Blues')
 
                 # plot static map (improves visualization)
                 rec = loader.dataset.ixes[counter]

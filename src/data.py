@@ -191,7 +191,7 @@ class NuscData(torch.utils.data.Dataset):
             pts[:, [1, 0]] = pts[:, [0, 1]]
             cv2.fillPoly(img, [pts], 1.0)
 
-        return torch.Tensor(img).unsqueeze(0)
+        return torch.Tensor(img).long()
 
     def choose_cams(self):
         if self.is_train and self.data_aug_conf['Ncams'] < len(self.data_aug_conf['cams']):

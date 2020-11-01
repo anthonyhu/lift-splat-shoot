@@ -15,6 +15,8 @@ from functools import reduce
 import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix
+
 from nuscenes.utils.data_classes import LidarPointCloud
 from nuscenes.utils.geometry_utils import transform_matrix
 from nuscenes.map_expansion.map_api import NuScenesMap
@@ -233,11 +235,46 @@ def get_batch_iou(preds, binimgs):
     """Assumes preds has NOT been sigmoided yet
     """
     with torch.no_grad():
-        pred = (preds > 0)
+        pred = torch.argmax(preds, dim=1).bool()
         tgt = binimgs.bool()
         intersect = (pred & tgt).sum().float().item()
         union = (pred | tgt).sum().float().item()
     return intersect, union, intersect / union if (union > 0) else 1.0
+
+
+def compute_miou(pred, gt, n_classes=2):
+    """ Calculate the mean IOU defined as TP / (TP + FN + FP).
+    Parameters
+    ----------
+        pred: np.array (batch_size, H, W)
+        gt: np.array (batch_size, H, W)
+    """
+    # Compute confusion matrix. IGNORED_ID being equal to 255, it will be ignored.
+    cm = confusion_matrix(gt.ravel(), pred.ravel(), np.arange(n_classes))
+
+    legend = {0: 'background', 1: 'vehicles'}
+
+    # Calculate mean IOU
+    miou_dict = {}
+    miou = 0
+    actual_n_classes = 0
+    for l in range(n_classes):
+        tp = cm[l, l]
+        fn = cm[l, :].sum() - tp
+        fp = cm[:, l].sum() - tp
+        denom = tp + fn + fp
+        if denom == 0:
+            iou = 1.0
+        else:
+            iou = tp / denom
+        miou_dict[legend[l]] = iou
+        miou += iou
+        actual_n_classes += 1
+
+    miou /= actual_n_classes
+
+    miou_dict['miou'] = miou
+    return miou_dict
 
 
 def get_val_info(model, valloader, loss_fn, device, use_tqdm=False, is_temporal=False, repeat_baseline=False,
@@ -246,6 +283,7 @@ def get_val_info(model, valloader, loss_fn, device, use_tqdm=False, is_temporal=
     total_loss = 0.0
     total_intersect = 0.0
     total_union = 0
+    total_iou = 0
     print('running eval...')
     loader = tqdm(valloader) if use_tqdm else valloader
     with torch.no_grad():
@@ -291,14 +329,17 @@ def get_val_info(model, valloader, loss_fn, device, use_tqdm=False, is_temporal=
             total_loss += loss_fn(preds, binimgs).item() * preds.shape[0]
 
             # iou
-            intersect, union, _ = get_batch_iou(preds, binimgs)
-            total_intersect += intersect
-            total_union += union
+            # intersect, union, _ = get_batch_iou(preds, binimgs)
+            # total_intersect += intersect
+            # total_union += union
+            miou = compute_miou((torch.argmax(preds, dim=1)).float().detach().cpu().numpy(), binimgs.cpu().numpy())
+            total_iou += miou['vehicles']
 
     model.train()
     return {
             'loss': total_loss / len(valloader.dataset),
-            'iou': total_intersect / total_union,
+            #'iou': total_intersect / total_union,
+            'iou': total_iou / len(valloader),
             }
 
 

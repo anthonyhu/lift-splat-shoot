@@ -5,6 +5,8 @@ Authors: Jonah Philion and Sanja Fidler
 """
 
 import torch
+import datetime
+import socket
 from time import time
 from tensorboardX import SummaryWriter
 import numpy as np
@@ -12,11 +14,14 @@ import os
 
 from .models import compile_model
 from .data import compile_data
-from .tools import SimpleLoss, get_batch_iou, get_val_info
+from .tools import get_batch_iou, compute_miou, get_val_info
 from .utils import print_model_spec, set_module_grad
 
 BATCH_SIZE = 2
+TAG = 'debug'
+OUTPUT_PATH = './runs/baseline'
 
+N_CLASSES = 2
 RAND_FLIP = False  # True for basic
 NCAMS = 6  # 5 for basic
 PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
@@ -30,14 +35,13 @@ MODEL_CONFIG = {'receptive_field': 3,
                 'use_pyramid_pooling': False,
                 }
 SEQUENCE_LENGTH = MODEL_CONFIG['receptive_field'] + MODEL_CONFIG['n_future']
-MODEL_NAME = 'temporal'
+MODEL_NAME = 'basic'
 LEARNING_RATE = 3e-4
 
 
 def train(version,
             dataroot='/data/cvfs/ah2029/datasets/nuscenes',
             nepochs=10000,
-            gpuid=0,
 
             H=900, W=1600,
             resize_lim=(0.193, 0.225),
@@ -47,9 +51,9 @@ def train(version,
             rand_flip=RAND_FLIP,
             ncams=NCAMS,
             max_grad_norm=5.0,
-            pos_weight=2.13,
-            logdir='./runs',
-
+            weight=[1.0, 2.13],
+            tag=TAG,
+            output_path=OUTPUT_PATH,
             xbound=[-50.0, 50.0, 0.5],
             ybound=[-50.0, 50.0, 0.5],
             zbound=[-10.0, 10.0, 20.0],
@@ -60,6 +64,7 @@ def train(version,
             lr=LEARNING_RATE,
             weight_decay=1e-7,
             ):
+    logdir = create_session_name(output_path, tag)
     if torch.cuda.device_count() == 8:
         dataroot = '/mnt/local/datasets/nuscenes'
 
@@ -89,9 +94,11 @@ def train(version,
                                           grid_conf=grid_conf, bsz=bsz, nworkers=nworkers,
                                           parser_name=parser_name, sequence_length=SEQUENCE_LENGTH)
 
-    device = torch.device('cpu') if gpuid < 0 else torch.device(f'cuda:{gpuid}')
+    device = torch.device('cuda:0')
 
-    model = compile_model(grid_conf, data_aug_conf, outC=1, name=MODEL_NAME, model_config=MODEL_CONFIG)
+    model = compile_model(grid_conf, data_aug_conf, outC=N_CLASSES, name=MODEL_NAME, model_config=MODEL_CONFIG)
+
+    model.to(device)
 
     # Load encoder/decoder weights
     if PRETRAINED_MODEL_WEIGHTS:
@@ -99,25 +106,28 @@ def train(version,
         # Delete first decoder weight because number of channels might change
         pretrained_model_weights = torch.load(PRETRAINED_MODEL_WEIGHTS)
         del pretrained_model_weights['bevencode.conv1.weight']
+        del pretrained_model_weights['bevencode.up2.4.weight']
+        del pretrained_model_weights['bevencode.up2.4.bias']
         model.load_state_dict(pretrained_model_weights, strict=False)
 
-        print('Freezing image to bev encoder.')
-        set_module_grad(model.camencode, requires_grad=True)
+        if MODEL_NAME == 'temporal':
+            print('Freezing image to bev encoder.')
+            set_module_grad(model.camencode, requires_grad=False)
 
-    # Print model specs
+    #  Print model specs
     print_model_spec(model.camencode, 'Image to BEV encoder')
-    print_model_spec(model.temporal_model, 'Temporal model')
-    print_model_spec(model.future_prediction, 'Future prediction module')
+    if MODEL_NAME == 'temporal':
+        print_model_spec(model.temporal_model, 'Temporal model')
+        print_model_spec(model.future_prediction, 'Future prediction module')
     print_model_spec(model.bevencode, 'BEV decoder')
-
-    model.to(device)
+    print_model_spec(model, 'Total')
 
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    loss_fn = SimpleLoss(pos_weight).cuda(gpuid)
+    loss_fn = torch.nn.CrossEntropyLoss(weight=torch.Tensor(weight)).to(device)
 
     writer = SummaryWriter(logdir=logdir)
-    val_step = 50 if version == 'mini' else 5000
+    val_step = 20 if version == 'mini' else 5000
 
     model.train()
     counter = 0
@@ -159,8 +169,10 @@ def train_step(imgs, rots, trans, intrins, post_rots, post_trans, binimgs, opt, 
         print(f'Iteration {counter}, loss={loss.item()}, step time ={t1 - t0}')
         writer.add_scalar('train/loss', loss, counter)
 
-    if counter % 50 == 0:
-        _, _, iou = get_batch_iou(preds, binimgs)
+    if counter % 20 == 0:
+        #_, _, iou = get_batch_iou(preds, binimgs.unsqueeze(1))
+        miou = compute_miou((torch.argmax(preds, dim=1)).float().detach().cpu().numpy(), binimgs.cpu().numpy())
+        iou = miou['vehicles']
         writer.add_scalar('train/iou', iou, counter)
         writer.add_scalar('train/epoch', epoch, counter)
         writer.add_scalar('train/step_time', t1 - t0, counter)
@@ -180,3 +192,12 @@ def train_step(imgs, rots, trans, intrins, post_rots, post_trans, binimgs, opt, 
         model.train()
 
     return counter
+
+
+def create_session_name(output_path, tag):
+    now = datetime.datetime.now()
+    session_name = 'session_{}_{:04d}_{:02d}_{:02d}_{:02d}_{:02d}_{:02d}_{}'.format(
+        socket.gethostname(), now.year, now.month, now.day, now.hour, now.minute, now.second, tag)
+    session_name = os.path.join(output_path, session_name)
+    os.makedirs(session_name)
+    return session_name

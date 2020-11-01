@@ -1,3 +1,5 @@
+import numpy as np
+
 def print_model_spec(model, name=''):
     n_parameters = count_n_parameters(model)
     n_trainable_parameters = count_n_parameters(model, only_trainable=True)
@@ -15,3 +17,10 @@ def count_n_parameters(model, only_trainable=False):
 def set_module_grad(module, requires_grad=False):
     for p in module.parameters():
         p.requires_grad = requires_grad
+
+
+def convert_figure_numpy(figure):
+    """ Convert figure to numpy image """
+    figure_np = np.frombuffer(figure.canvas.tostring_rgb(), dtype=np.uint8)
+    figure_np = figure_np.reshape(figure.canvas.get_width_height()[::-1] + (3,))
+    return figure_np
