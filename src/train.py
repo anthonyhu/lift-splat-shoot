@@ -13,23 +13,25 @@ import os
 from .models import compile_model
 from .data import compile_data
 from .tools import SimpleLoss, get_batch_iou, get_val_info
+from .utils import print_model_spec, set_module_grad
 
-MODEL_NAME = 'temporal'
 BATCH_SIZE = 2
-LEARNING_RATE = 1e-3
 
 RAND_FLIP = False  # True for basic
 NCAMS = 6  # 5 for basic
+PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
 MODEL_CONFIG = {'receptive_field': 3,
                 'n_future': 3,
                 'latent_dim': 1,
                 'action_as_input': False,
-                'temporal_model_name': 'temporal_block',
+                'temporal_model_name': 'gru',
                 'start_out_channels': 80,
                 'extra_in_channels': 8,
                 'use_pyramid_pooling': False,
                 }
 SEQUENCE_LENGTH = MODEL_CONFIG['receptive_field'] + MODEL_CONFIG['n_future']
+MODEL_NAME = 'temporal'
+LEARNING_RATE = 3e-4
 
 
 def train(version,
@@ -90,6 +92,24 @@ def train(version,
     device = torch.device('cpu') if gpuid < 0 else torch.device(f'cuda:{gpuid}')
 
     model = compile_model(grid_conf, data_aug_conf, outC=1, name=MODEL_NAME, model_config=MODEL_CONFIG)
+
+    # Load encoder/decoder weights
+    if PRETRAINED_MODEL_WEIGHTS:
+        print(f'Loading weights from {PRETRAINED_MODEL_WEIGHTS}')
+        # Delete first decoder weight because number of channels might change
+        pretrained_model_weights = torch.load(PRETRAINED_MODEL_WEIGHTS)
+        del pretrained_model_weights['bevencode.conv1.weight']
+        model.load_state_dict(pretrained_model_weights, strict=False)
+
+        print('Freezing image to bev encoder.')
+        set_module_grad(model.camencode, requires_grad=True)
+
+    # Print model specs
+    print_model_spec(model.camencode, 'Image to BEV encoder')
+    print_model_spec(model.temporal_model, 'Temporal model')
+    print_model_spec(model.future_prediction, 'Future prediction module')
+    print_model_spec(model.bevencode, 'BEV decoder')
+
     model.to(device)
 
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -97,7 +117,7 @@ def train(version,
     loss_fn = SimpleLoss(pos_weight).cuda(gpuid)
 
     writer = SummaryWriter(logdir=logdir)
-    val_step = 50 if version == 'mini' else 10000
+    val_step = 50 if version == 'mini' else 5000
 
     model.train()
     counter = 0
@@ -136,7 +156,7 @@ def train_step(imgs, rots, trans, intrins, post_rots, post_trans, binimgs, opt, 
     t1 = time()
 
     if counter % 10 == 0:
-        print(counter, loss.item())
+        print(f'Iteration {counter}, loss={loss.item()}, step time ={t1 - t0}')
         writer.add_scalar('train/loss', loss, counter)
 
     if counter % 50 == 0:
@@ -144,7 +164,7 @@ def train_step(imgs, rots, trans, intrins, post_rots, post_trans, binimgs, opt, 
         writer.add_scalar('train/iou', iou, counter)
         writer.add_scalar('train/epoch', epoch, counter)
         writer.add_scalar('train/step_time', t1 - t0, counter)
-        print(f'step time: {t1 - t0}, train iou: {iou}')
+        print(f'train iou: {iou}')
 
     if counter % val_step == 0:
         val_info = get_val_info(model, valloader, loss_fn, device, is_temporal=(MODEL_NAME == 'temporal'))
