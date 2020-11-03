@@ -245,45 +245,6 @@ def get_batch_iou(preds, binimgs):
     return intersect, union, intersect / union if (union > 0) else 1.0
 
 
-def compute_miou(pred, gt, n_classes=2):
-    """ Calculate the mean IOU defined as TP / (TP + FN + FP).
-    Parameters
-    ----------
-        pred: np.array (batch_size, H, W)
-        gt: np.array (batch_size, H, W)
-    """
-    # Compute confusion matrix. IGNORED_ID being equal to 255, it will be ignored.
-    cm = confusion_matrix(gt.ravel(), pred.ravel(), np.arange(n_classes))
-
-    legend = {0: 'background',
-              VEHICLES_ID: 'vehicles',
-              DRIVEABLE_AREA_ID: 'driveable_area',
-              LINE_MARKINGS_ID: 'line_markings',
-              }
-
-    # Calculate mean IOU
-    miou_dict = {}
-    miou = 0
-    actual_n_classes = 0
-    for l in range(n_classes):
-        tp = cm[l, l]
-        fn = cm[l, :].sum() - tp
-        fp = cm[:, l].sum() - tp
-        denom = tp + fn + fp
-        if denom == 0:
-            iou = 1.0
-        else:
-            iou = tp / denom
-        miou_dict[legend[l]] = iou
-        miou += iou
-        actual_n_classes += 1
-
-    miou /= actual_n_classes
-
-    miou_dict['miou'] = miou
-    return miou_dict
-
-
 def get_val_info(model, valloader, loss_fn, device, use_tqdm=True, is_temporal=False, repeat_baseline=False,
                  receptive_field=0, n_classes=0):
     t0 = time()
@@ -457,6 +418,45 @@ def get_local_map(nmap, center, stretch, layer_names, line_names):
     return polys
 
 
+def compute_miou(pred, gt, n_classes=2):
+    """ Calculate the mean IOU defined as TP / (TP + FN + FP).
+    Parameters
+    ----------
+        pred: np.array (batch_size, H, W)
+        gt: np.array (batch_size, H, W)
+    """
+    # Compute confusion matrix. IGNORED_ID being equal to 255, it will be ignored.
+    cm = confusion_matrix(gt.ravel(), pred.ravel(), np.arange(n_classes))
+
+    legend = {0: 'background',
+              VEHICLES_ID: 'vehicles',
+              DRIVEABLE_AREA_ID: 'driveable_area',
+              LINE_MARKINGS_ID: 'line_markings',
+              }
+
+    # Calculate mean IOU
+    miou_dict = {}
+    miou = 0
+    actual_n_classes = 0
+    for l in range(n_classes):
+        tp = cm[l, l]
+        fn = cm[l, :].sum() - tp
+        fp = cm[:, l].sum() - tp
+        denom = tp + fn + fp
+        if denom == 0:
+            iou = 1.0
+        else:
+            iou = tp / denom
+        miou_dict[legend[l]] = iou
+        miou += iou
+        actual_n_classes += 1
+
+    miou /= actual_n_classes
+
+    miou_dict['miou'] = miou
+    return miou_dict
+
+
 def save_static_labels(dataroot='/data/cvfs/ah2029/datasets/nuscenes', version='mini'):
     from src.data import SegmentationData
     from nuscenes.nuscenes import NuScenes
@@ -505,7 +505,7 @@ def save_static_labels(dataroot='/data/cvfs/ah2029/datasets/nuscenes', version='
     for is_train in [True, False]:
         dataset = SegmentationData(nusc, is_train=is_train, data_aug_conf=data_aug_conf, grid_conf=grid_conf,
                                    sequence_length=6, map_labels=True,
-                                   map_dataroot=dataroot)
+                                   dataroot=dataroot)
         if is_train:
             mode = 'train'
         else:
@@ -521,8 +521,6 @@ def save_static_labels(dataroot='/data/cvfs/ah2029/datasets/nuscenes', version='
 
         for i in tqdm(range(len(dataset))):
             partial(save_static_label_iter, dataset=dataset, dataroot=dataroot, mode=mode)(i)
-
-        # binimg_opened = np.asarray(Image.open(label_path)).astype(np.int64)
 
     t1 = time()
     print(f'Saving the labels took: {(t1 - t0) / 60}mins')

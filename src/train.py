@@ -66,7 +66,7 @@ def train(version,
             dbound=[4.0, 45.0, 1.0],
 
             bsz=BATCH_SIZE,
-            nworkers=6,
+            nworkers=5,
             lr=LEARNING_RATE,
             weight_decay=1e-7,
             ):
@@ -118,8 +118,9 @@ def train(version,
         model.load_state_dict(pretrained_model_weights, strict=False)
 
         if MODEL_NAME == 'temporal':
-            print('Freezing image to bev encoder.')
-            set_module_grad(model.camencode, requires_grad=False)
+            pass
+            #print('Freezing image to bev encoder.')
+            #set_module_grad(model.camencode, requires_grad=False)
 
     #  Print model specs
     print_model_spec(model.camencode, 'Image to BEV encoder')

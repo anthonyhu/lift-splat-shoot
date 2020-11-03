@@ -26,17 +26,18 @@ from .constants import VEHICLES_ID, DRIVEABLE_AREA_ID, LINE_MARKINGS_ID
 
 class NuscData(torch.utils.data.Dataset):
     def __init__(self, nusc, is_train, data_aug_conf, grid_conf, sequence_length=0, map_labels=False,
-                 map_dataroot='', version=''):
+                 dataroot=''):
         self.nusc = nusc
         self.is_train = is_train
         self.data_aug_conf = data_aug_conf
         self.grid_conf = grid_conf
         self.sequence_length = sequence_length
         self.map_labels = map_labels
-        self.version = version
+        self.dataroot = dataroot
+        self.mode = 'train' if self.is_train else 'val'
 
         if map_labels:
-            self.nusc_maps = get_nusc_maps(map_dataroot)
+            self.nusc_maps = get_nusc_maps(self.dataroot)
             scene2map = {}
             for rec in self.nusc.scene:
                 log = self.nusc.get('log', rec['log_token'])
@@ -213,7 +214,8 @@ class NuscData(torch.utils.data.Dataset):
 
         return torch.Tensor(img).long()
 
-    def get_static_label(self, rec):
+    def get_static_label(self, rec, index):
+        print(f'Generating static scene for dataset {self.mode} and index={index}')
         dpi = 100
         height, width = (200, 200)
         driveable_area_color = (1.00, 0.50, 0.31)
@@ -282,7 +284,28 @@ class NuscData(torch.utils.data.Dataset):
 
         label[fig_np.sum(axis=2) < 255 * 3] = self.line_markings_id
 
-        return torch.Tensor(label).long()
+        label = torch.Tensor(label).long()
+        return label
+
+    def get_label(self, rec, index):
+        binimg = self.get_binimg(rec)
+        if self.map_labels:
+            static_label = self.get_static_label(rec, index)
+            # Add car labels
+            static_label[binimg == 1] = VEHICLES_ID
+            binimg = static_label
+
+        # Load saved labels
+        label_path = os.path.join(self.dataroot, 'bev_label', self.mode, f'bev_label_{index:08d}.png')
+
+        if os.path.isfile(label_path):
+            label = np.asarray(Image.open(label_path)).astype(np.int64)
+            label_opened = torch.Tensor(label).long()
+
+            if not torch.equal(binimg, label_opened):
+                print(f'Index {index} ==============\n NOT EQUAL')
+
+        return binimg
 
     def choose_cams(self):
         if self.is_train and self.data_aug_conf['Ncams'] < len(self.data_aug_conf['cams']):
@@ -324,12 +347,7 @@ class SegmentationData(NuscData):
 
         cams = self.choose_cams()
         imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
-        binimg = self.get_binimg(rec)
-        if self.map_labels:
-            static_label = self.get_static_label(rec)
-            # Add car labels
-            static_label[binimg == 1] = VEHICLES_ID
-            binimg = static_label
+        binimg = self.get_label(rec, index)
         
         return imgs, rots, trans, intrins, post_rots, post_trans, binimg
 
@@ -341,23 +359,23 @@ class SequentialSegmentationData(SegmentationData):
         cams = self.choose_cams()
 
         previous_rec = None
+        index_t = None
+        previous_index_t = None
         for t in range(self.sequence_length):
             if index + t >= len(self):
                 rec = previous_rec
+                index_t = previous_index_t
             else:
                 rec = self.ixes[index + t]
+                index_t = index + t
 
                 if (previous_rec is not None) and (rec['scene_token'] != previous_rec['scene_token']):
                     # Repeat image
                     rec = previous_rec
+                    index_t = previous_index_t
 
             imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
-            binimg = self.get_binimg(rec)
-            if self.map_labels:
-                static_label = self.get_static_label(rec)
-                # Add car labels
-                static_label[binimg == 1] = VEHICLES_ID
-                binimg = static_label
+            binimg = self.get_label(rec, index_t)
 
             list_imgs.append(imgs)
             list_rots.append(rots)
@@ -368,6 +386,7 @@ class SequentialSegmentationData(SegmentationData):
             list_binimg.append(binimg)
 
             previous_rec = rec
+            previous_index_t = index_t
 
         list_imgs, list_rots, list_trans, list_intrins = torch.stack(list_imgs), torch.stack(list_rots), \
                                                          torch.stack(list_trans), torch.stack(list_intrins)
@@ -396,10 +415,10 @@ def compile_data(version, dataroot, data_aug_conf, grid_conf, bsz,
     }[parser_name]
     traindata = parser(nusc, is_train=True, data_aug_conf=data_aug_conf,
                        grid_conf=grid_conf, sequence_length=sequence_length, map_labels=map_labels,
-                       map_dataroot=dataroot, version=version)
+                       dataroot=dataroot)
     valdata = parser(nusc, is_train=False, data_aug_conf=data_aug_conf,
                      grid_conf=grid_conf, sequence_length=sequence_length, map_labels=map_labels,
-                     map_dataroot=dataroot, version=version)
+                     dataroot=dataroot)
 
     trainloader = torch.utils.data.DataLoader(traindata, batch_size=bsz,
                                               shuffle=True,
