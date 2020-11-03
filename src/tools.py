@@ -5,6 +5,7 @@ Authors: Jonah Philion and Sanja Fidler
 """
 
 import os
+from time import time
 import numpy as np
 import torch
 import torchvision
@@ -20,6 +21,8 @@ from sklearn.metrics import confusion_matrix
 from nuscenes.utils.data_classes import LidarPointCloud
 from nuscenes.utils.geometry_utils import transform_matrix
 from nuscenes.map_expansion.map_api import NuScenesMap
+
+from .constants import VEHICLES_ID, DRIVEABLE_AREA_ID, LINE_MARKINGS_ID
 
 
 def get_lidar_data(nusc, sample_rec, nsweeps, min_distance):
@@ -252,7 +255,11 @@ def compute_miou(pred, gt, n_classes=2):
     # Compute confusion matrix. IGNORED_ID being equal to 255, it will be ignored.
     cm = confusion_matrix(gt.ravel(), pred.ravel(), np.arange(n_classes))
 
-    legend = {0: 'background', 1: 'vehicles'}
+    legend = {0: 'background',
+              VEHICLES_ID: 'vehicles',
+              DRIVEABLE_AREA_ID: 'driveable_area',
+              LINE_MARKINGS_ID: 'line_markings',
+              }
 
     # Calculate mean IOU
     miou_dict = {}
@@ -277,8 +284,9 @@ def compute_miou(pred, gt, n_classes=2):
     return miou_dict
 
 
-def get_val_info(model, valloader, loss_fn, device, use_tqdm=False, is_temporal=False, repeat_baseline=False,
-                 receptive_field=0):
+def get_val_info(model, valloader, loss_fn, device, use_tqdm=True, is_temporal=False, repeat_baseline=False,
+                 receptive_field=0, n_classes=0):
+    t0 = time()
     model.eval()
     total_loss = 0.0
     total_intersect = 0.0
@@ -332,10 +340,14 @@ def get_val_info(model, valloader, loss_fn, device, use_tqdm=False, is_temporal=
             # intersect, union, _ = get_batch_iou(preds, binimgs)
             # total_intersect += intersect
             # total_union += union
-            miou = compute_miou((torch.argmax(preds, dim=1)).float().detach().cpu().numpy(), binimgs.cpu().numpy())
+            miou = compute_miou((torch.argmax(preds, dim=1)).float().detach().cpu().numpy(), binimgs.cpu().numpy(),
+                                n_classes=n_classes)
             total_iou += miou['vehicles']
 
     model.train()
+    t1 = time()
+    print(f'Evaluation on the validation set took: {(t1 - t0) / 60}mins')
+
     return {
             'loss': total_loss / len(valloader.dataset),
             #'iou': total_intersect / total_union,
@@ -489,19 +501,26 @@ def save_static_labels(dataroot='/data/cvfs/ah2029/datasets/nuscenes', version='
         'Ncams': 5,
     }
 
-    pool = Pool(cpu_count() - 1)
+    pool = Pool(6)
     for is_train in [True, False]:
         dataset = SegmentationData(nusc, is_train=is_train, data_aug_conf=data_aug_conf, grid_conf=grid_conf,
                                    sequence_length=6, map_labels=True,
                                    map_dataroot=dataroot)
-        for _ in tqdm(
-                pool.imap_unordered(
-                    partial(save_static_label_iter, dataset=dataset, dataroot=dataroot),
-                    range(len(dataset)),
-                ),
-                total=len(dataset)
-        ):
-            pass
+        if is_train:
+            mode = 'train'
+        else:
+            mode = 'val'
+        # for _ in tqdm(
+        #         pool.imap_unordered(
+        #             partial(save_static_label_iter, dataset=dataset, dataroot=dataroot, mode=mode),
+        #             range(len(dataset)),
+        #         ),
+        #         total=len(dataset)
+        # ):
+        #     pass
+
+        for i in tqdm(range(len(dataset))):
+            partial(save_static_label_iter, dataset=dataset, dataroot=dataroot, mode=mode)(i)
 
         # binimg_opened = np.asarray(Image.open(label_path)).astype(np.int64)
 
@@ -509,10 +528,10 @@ def save_static_labels(dataroot='/data/cvfs/ah2029/datasets/nuscenes', version='
     print(f'Saving the labels took: {(t1 - t0) / 60}mins')
 
 
-def save_static_label_iter(i, dataset, dataroot):
+def save_static_label_iter(i, dataset, dataroot, mode):
     imgs, rots, trans, intrins, post_rots, post_trans, binimg = dataset[i]
 
-    output_path = os.path.join(dataroot, 'bev_label')
+    output_path = os.path.join(dataroot, 'bev_label', mode)
     os.makedirs(output_path, exist_ok=True)
     label_path = os.path.join(output_path, f'bev_label_{i:08d}.png')
     binimg = Image.fromarray(binimg.numpy().astype(np.int32), mode='I')

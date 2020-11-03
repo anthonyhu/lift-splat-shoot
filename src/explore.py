@@ -254,7 +254,7 @@ def eval_model_iou(version,
 
     model.eval()
     val_info = get_val_info(model, valloader, loss_fn, device, is_temporal=False, repeat_baseline=True,
-                            receptive_field=3)
+                            receptive_field=3, n_classes=N_CLASSES)
     print(val_info)
 
 

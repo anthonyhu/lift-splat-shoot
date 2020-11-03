@@ -21,6 +21,7 @@ from glob import glob
 
 from .tools import get_lidar_data, img_transform, normalize_img, gen_dx_bx, get_nusc_maps, get_local_map
 from .utils import convert_figure_numpy
+from .constants import VEHICLES_ID, DRIVEABLE_AREA_ID, LINE_MARKINGS_ID
 
 
 class NuscData(torch.utils.data.Dataset):
@@ -42,8 +43,8 @@ class NuscData(torch.utils.data.Dataset):
                 scene2map[rec['name']] = log['location']
             self.scene2map = scene2map
 
-            self.driveable_area_id = 2
-            self.line_markings_id = 3
+            self.driveable_area_id = DRIVEABLE_AREA_ID
+            self.line_markings_id = LINE_MARKINGS_ID
 
         self.scenes = self.get_scenes()
         self.ixes = self.prepro()
@@ -327,7 +328,7 @@ class SegmentationData(NuscData):
         if self.map_labels:
             static_label = self.get_static_label(rec)
             # Add car labels
-            static_label[binimg == 1] = 1
+            static_label[binimg == 1] = VEHICLES_ID
             binimg = static_label
         
         return imgs, rots, trans, intrins, post_rots, post_trans, binimg
@@ -355,7 +356,7 @@ class SequentialSegmentationData(SegmentationData):
             if self.map_labels:
                 static_label = self.get_static_label(rec)
                 # Add car labels
-                static_label[binimg == 1] = 1
+                static_label[binimg == 1] = VEHICLES_ID
                 binimg = static_label
 
             list_imgs.append(imgs)

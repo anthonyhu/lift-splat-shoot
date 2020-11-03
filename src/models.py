@@ -288,6 +288,7 @@ class TemporalModel(nn.Module):
 
     def create_model(self):
         if self.name == 'gru':
+            #return SpatialGRU(self.in_channels, self.in_channels, norm=self.norm, activation=self.activation)
             return nn.Sequential(SpatialGRU(self.in_channels, self.in_channels, norm=self.norm,
                                             activation=self.activation),
                                  SpatialGRU(self.in_channels, self.in_channels, norm=self.norm,

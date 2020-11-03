@@ -19,7 +19,7 @@ from .utils import print_model_spec, set_module_grad
 
 BATCH_SIZE = 1
 TAG = 'debug'
-OUTPUT_PATH = './runs/4_classes'
+OUTPUT_PATH = './runs/debug'
 
 MAP_LABELS = True
 
@@ -178,7 +178,8 @@ def train_step(imgs, rots, trans, intrins, post_rots, post_trans, binimgs, opt, 
 
     if counter % 50 == 0:
         #_, _, iou = get_batch_iou(preds, binimgs.unsqueeze(1))
-        miou = compute_miou((torch.argmax(preds, dim=1)).float().detach().cpu().numpy(), binimgs.cpu().numpy())
+        miou = compute_miou((torch.argmax(preds, dim=1)).float().detach().cpu().numpy(), binimgs.cpu().numpy(),
+                            n_classes=N_CLASSES)
         iou = miou['vehicles']
         writer.add_scalar('train/iou', iou, counter)
         writer.add_scalar('train/epoch', epoch, counter)
@@ -186,7 +187,8 @@ def train_step(imgs, rots, trans, intrins, post_rots, post_trans, binimgs, opt, 
         print(f'train iou: {iou}')
 
     if counter % val_step == 0:
-        val_info = get_val_info(model, valloader, loss_fn, device, is_temporal=(MODEL_NAME == 'temporal'))
+        val_info = get_val_info(model, valloader, loss_fn, device, is_temporal=(MODEL_NAME == 'temporal'),
+                                n_classes=N_CLASSES)
         print('VAL', val_info)
         writer.add_scalar('val/loss', val_info['loss'], counter)
         writer.add_scalar('val/iou', val_info['iou'], counter)
