@@ -288,24 +288,24 @@ class NuscData(torch.utils.data.Dataset):
         return label
 
     def get_label(self, rec, index):
-        binimg = self.get_binimg(rec)
-        if self.map_labels:
-            static_label = self.get_static_label(rec, index)
-            # Add car labels
-            static_label[binimg == 1] = VEHICLES_ID
-            binimg = static_label
-
+        return self.get_binimg(rec)
         # Load saved labels
         label_path = os.path.join(self.dataroot, 'bev_label', self.mode, f'bev_label_{index:08d}.png')
 
         if os.path.isfile(label_path):
             label = np.asarray(Image.open(label_path)).astype(np.int64)
-            label_opened = torch.Tensor(label).long()
+            label = torch.Tensor(label).long()
+            return label
 
-            if not torch.equal(binimg, label_opened):
-                print(f'Index {index} ==============\n NOT EQUAL')
+        print(f'Generating labels for index {index}')
+        binimg = self.get_binimg(rec)
+        if self.map_labels:
+            static_label = self.get_static_label(rec, index)
+            # Add car labels
+            static_label[binimg == 1] = VEHICLES_ID
+            label = static_label
 
-        return binimg
+        return label
 
     def choose_cams(self):
         if self.is_train and self.data_aug_conf['Ncams'] < len(self.data_aug_conf['cams']):
