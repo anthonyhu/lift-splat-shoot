@@ -19,7 +19,7 @@ from .utils import print_model_spec, set_module_grad
 
 BATCH_SIZE = 1
 TAG = 'debug'
-OUTPUT_PATH = './runs/future_egomotion'
+OUTPUT_PATH = './runs/future_egomotion_gru'
 
 MODEL_NAME = 'temporal'
 PREDICT_FUTURE_EGOMOTION = True
@@ -37,7 +37,7 @@ MODEL_CONFIG = {'receptive_field': receptive_field,
                 'n_future': n_future,
                 'latent_dim': 1,
                 'predict_future_egomotion': PREDICT_FUTURE_EGOMOTION,
-                'temporal_model_name': 'temporal_block',
+                'temporal_model_name': 'gru',
                 'start_out_channels': 80,
                 'extra_in_channels': 8,
                 'use_pyramid_pooling': False,
