@@ -260,7 +260,7 @@ class LiftSplatShoot(nn.Module):
     def unpack_sequence_dim(x, b, s):
         return x.view(b, s, *x.shape[1:])
 
-    def forward(self, x, rots, trans, intrins, post_rots, post_trans):
+    def forward(self, x, rots, trans, intrins, post_rots, post_trans, future_egomotions):
         x = self.get_voxels(x, rots, trans, intrins, post_rots, post_trans)
         x = self.bevencode(x)
         return x
@@ -336,8 +336,9 @@ class TemporalModel(nn.Module):
 
 
 class FuturePrediction(torch.nn.Module):
-    def __init__(self, in_channels, latent_dim, action_as_input=False, n_gru_blocks=1, n_res_layers=3):
+    def __init__(self, in_channels, latent_dim, predict_future_egomotion=False, n_gru_blocks=3, n_res_layers=3):
         super().__init__()
+        self.predict_future_egomotion = predict_future_egomotion
         self.n_gru_blocks = n_gru_blocks
 
         # Convolutional recurrent model with z_t as an initial hidden state and inputs the sample
@@ -345,9 +346,6 @@ class FuturePrediction(torch.nn.Module):
         # [Spatial GRU - [Bottleneck] x n_res_layers] x n_gru_blocks
         self.spatial_grus = []
         self.res_blocks = []
-
-        if action_as_input:
-            latent_dim += 3  # steering, throttle, brake
 
         for i in range(self.n_gru_blocks):
             gru_in_channels = latent_dim if i == 0 else in_channels
@@ -358,11 +356,18 @@ class FuturePrediction(torch.nn.Module):
         self.spatial_grus = torch.nn.ModuleList(self.spatial_grus)
         self.res_blocks = torch.nn.ModuleList(self.res_blocks)
 
-    def forward(self, x, hidden_state):
+    def forward(self, x, hidden_state, future_egomotions):
         # pylint: disable=arguments-differ
         # x has shape (b, n_future, c, h, w), hidden_state (b, c, h, w)
         for i in range(self.n_gru_blocks):
-            x = self.spatial_grus[i](x, hidden_state)
+
+            if self.predict_future_egomotion and i == 0:
+                # Warp features with respect to future ego-motion
+                flow = future_egomotions
+            else:
+                flow = None
+
+            x = self.spatial_grus[i](x, hidden_state, flow)
             b, n_future, c, h, w = x.shape
 
             x = self.res_blocks[i](x.view(b * n_future, c, h, w))
@@ -377,7 +382,7 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         self.receptive_field = model_config['receptive_field']  # 3
         self.n_future = model_config['n_future']  # 5
         self.latent_dim = model_config['latent_dim']  # 16
-        self.action_as_input = model_config['action_as_input']  # False
+        self.predict_future_egomotion = model_config['predict_future_egomotion']  # False
         self.temporal_model_name = model_config['temporal_model_name']  # gru
         self.start_out_channels = model_config['start_out_channels']  # 80
         self.extra_in_channels = model_config['extra_in_channels']  # 8
@@ -394,12 +399,13 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
                                        + self.extra_in_channels * (self.receptive_field - 2))
 
         self.future_prediction = FuturePrediction(
-            in_channels=future_pred_in_channels, latent_dim=self.latent_dim, action_as_input=self.action_as_input,
+            in_channels=future_pred_in_channels, latent_dim=self.latent_dim,
+            predict_future_egomotion=self.predict_future_egomotion,
         )
 
         self.bevencode = BevEncode(inC=future_pred_in_channels, outC=outC)
 
-    def forward(self, imgs, rots, trans, intrins, post_rots, post_trans):
+    def forward(self, imgs, rots, trans, intrins, post_rots, post_trans, future_egomotions):
         b, s, n, c, h, w = imgs.shape
         # Reshape
         imgs = self.pack_sequence_dim(imgs)
@@ -422,17 +428,10 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         b, _, h, w = hidden_state.shape
         latent_tensor = hidden_state.new_zeros(b, self.n_future, self.latent_dim, h, w)
 
-        if self.action_as_input:
-            raise ValueError('Not defined yet')
-            # # Concatenate action to latent_tensor
-            # action = batch.action.unsqueeze(-1).unsqueeze(-1)
-            # action = action.repeat(1, 1, 1, h, w)
-            # # Only select future actions
-            # action = action[:, receptive_field:].contiguous()
-            #
-            # latent_tensor = torch.cat([latent_tensor, action], dim=2)
-
-        z_future = self.future_prediction(latent_tensor, hidden_state)  # shape (b, n_future, 256, 10, 24)
+        z_future = self.future_prediction(latent_tensor, hidden_state,
+                                          future_egomotions[:, (self.receptive_field - 1):-1])  # shape (b, n_future,
+        # 256,
+        # 10, 24)
 
         # Decode present
         z_t = hidden_state.unsqueeze(1)

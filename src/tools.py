@@ -257,7 +257,7 @@ def get_val_info(model, valloader, loss_fn, device, use_tqdm=True, is_temporal=F
     loader = tqdm(valloader) if use_tqdm else valloader
     with torch.no_grad():
         for batch in loader:
-            allimgs, rots, trans, intrins, post_rots, post_trans, binimgs = batch
+            allimgs, rots, trans, intrins, post_rots, post_trans, binimgs, future_egomotions = batch
 
             if repeat_baseline:
                 b, s, n, c, h, w = allimgs.shape
@@ -268,10 +268,11 @@ def get_val_info(model, valloader, loss_fn, device, use_tqdm=True, is_temporal=F
                 intrins = model.pack_sequence_dim(intrins)
                 post_rots = model.pack_sequence_dim(post_rots)
                 post_trans = model.pack_sequence_dim(post_trans)
+                future_egomotions = model.pack_sequence_dim(future_egomotions)
 
             preds = model(allimgs.to(device), rots.to(device),
                           trans.to(device), intrins.to(device), post_rots.to(device),
-                          post_trans.to(device))
+                          post_trans.to(device), future_egomotions.to(device))
             binimgs = binimgs.to(device)
 
             if repeat_baseline:
@@ -416,6 +417,16 @@ def get_local_map(nmap, center, stretch, layer_names, line_names):
             polys[layer_name][rowi] = np.dot(polys[layer_name][rowi], rot)
 
     return polys
+
+
+def convert_egopose_to_matrix(egopose):
+    transformation_matrix = np.zeros((4, 4), dtype=np.float32)
+    rotation = Quaternion(egopose['rotation']).rotation_matrix
+    translation = np.array(egopose['translation'])
+    transformation_matrix[:3, :3] = rotation
+    transformation_matrix[:3, 3] = translation
+    transformation_matrix[3, 3] = 1.0
+    return transformation_matrix
 
 
 def compute_miou(pred, gt, n_classes=2):

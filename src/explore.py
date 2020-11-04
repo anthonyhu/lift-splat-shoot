@@ -77,7 +77,8 @@ def lidar_check(version,
     gs.update(wspace=0.0, hspace=0.0, left=0.0, right=1.0, top=1.0, bottom=0.0)
 
     for epoch in range(nepochs):
-        for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, pts, binimgs) in enumerate(loader):
+        for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, pts, binimgs, future_egomotions) in enumerate(
+                loader):
 
             img_pts = model.get_geometry(rots, trans, intrins, post_rots, post_trans)
 
@@ -170,7 +171,7 @@ def cumsum_check(version,
     model.to(device)
 
     model.eval()
-    for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, binimgs) in enumerate(loader):
+    for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, binimgs, future_egomotions) in enumerate(loader):
 
         model.use_quickcumsum = False
         model.zero_grad()
@@ -331,7 +332,7 @@ def viz_model_preds(version,
     model.eval()
     counter = 0
     with torch.no_grad():
-        for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, binimgs) in enumerate(loader):
+        for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, binimgs, future_egomotions) in enumerate(loader):
             out = model(imgs.to(device),
                     rots.to(device),
                     trans.to(device),

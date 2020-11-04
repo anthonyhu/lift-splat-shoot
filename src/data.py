@@ -19,7 +19,8 @@ from nuscenes.utils.splits import create_splits_scenes
 from nuscenes.utils.data_classes import Box
 from glob import glob
 
-from .tools import get_lidar_data, img_transform, normalize_img, gen_dx_bx, get_nusc_maps, get_local_map
+from .tools import get_lidar_data, img_transform, normalize_img, gen_dx_bx, get_nusc_maps, get_local_map, \
+    convert_egopose_to_matrix
 from .utils import convert_figure_numpy
 from .constants import VEHICLES_ID, DRIVEABLE_AREA_ID, LINE_MARKINGS_ID
 
@@ -307,6 +308,30 @@ class NuscData(torch.utils.data.Dataset):
 
         return label
 
+    def get_future_egomotion(self, rec, index):
+        rec_t0 = rec
+
+        # Identity
+        future_egomotion = np.eye(4, dtype=np.float32)
+
+        if index < len(self.ixes) - 1:
+            rec_t1 = self.ixes[index + 1]
+
+            if rec_t0['scene_token'] == rec_t1['scene_token']:
+                egopose_t0 = \
+                    self.nusc.get('ego_pose', self.nusc.get('sample_data', rec_t0['data']['LIDAR_TOP'])['ego_pose_token'])
+                egopose_t1 = \
+                    self.nusc.get('ego_pose', self.nusc.get('sample_data', rec_t1['data']['LIDAR_TOP'])['ego_pose_token'])
+
+                egopose_t0 = convert_egopose_to_matrix(egopose_t0)
+                egopose_t1 = convert_egopose_to_matrix(egopose_t1)
+
+                future_egomotion = np.linalg.inv(egopose_t1).dot(egopose_t0)
+                future_egomotion[3, :3] = 0.0
+                future_egomotion[3, 3] = 1.0
+
+        return torch.Tensor(future_egomotion).float()
+
     def choose_cams(self):
         if self.is_train and self.data_aug_conf['Ncams'] < len(self.data_aug_conf['cams']):
             cams = np.random.choice(self.data_aug_conf['cams'], self.data_aug_conf['Ncams'],
@@ -348,14 +373,15 @@ class SegmentationData(NuscData):
         cams = self.choose_cams()
         imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
         binimg = self.get_label(rec, index)
+        future_egomotion = self.get_future_egomotion(rec, index)
         
-        return imgs, rots, trans, intrins, post_rots, post_trans, binimg
+        return imgs, rots, trans, intrins, post_rots, post_trans, binimg, future_egomotion
 
 
 class SequentialSegmentationData(SegmentationData):
     def __getitem__(self, index):
         list_imgs, list_rots, list_trans, list_intrins = [], [], [], []
-        list_post_rots, list_post_trans, list_binimg = [], [], []
+        list_post_rots, list_post_trans, list_binimg, list_future_egomotion = [], [], [], []
         cams = self.choose_cams()
 
         previous_rec = None
@@ -376,6 +402,7 @@ class SequentialSegmentationData(SegmentationData):
 
             imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
             binimg = self.get_label(rec, index_t)
+            future_egomotion = self.get_future_egomotion(rec, index_t)
 
             list_imgs.append(imgs)
             list_rots.append(rots)
@@ -384,6 +411,7 @@ class SequentialSegmentationData(SegmentationData):
             list_post_rots.append(post_rots)
             list_post_trans.append(post_trans)
             list_binimg.append(binimg)
+            list_future_egomotion.append(future_egomotion)
 
             previous_rec = rec
             previous_index_t = index_t
@@ -393,8 +421,11 @@ class SequentialSegmentationData(SegmentationData):
 
         list_post_rots, list_post_trans, list_binimg = torch.stack(list_post_rots), torch.stack(list_post_trans), \
                                                        torch.stack(list_binimg)
+        list_future_egomotion = torch.stack(list_future_egomotion)
 
-        return list_imgs, list_rots, list_trans, list_intrins, list_post_rots, list_post_trans, list_binimg
+        return (list_imgs, list_rots, list_trans, list_intrins, list_post_rots, list_post_trans, list_binimg,
+                list_future_egomotion)
+
 
 
 def worker_rnd_init(x):

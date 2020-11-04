@@ -19,26 +19,37 @@ from .utils import print_model_spec, set_module_grad
 
 BATCH_SIZE = 1
 TAG = 'debug'
-OUTPUT_PATH = './runs/debug'
+OUTPUT_PATH = './runs/future_egomotion'
 
-MAP_LABELS = True
+MODEL_NAME = 'temporal'
+PREDICT_FUTURE_EGOMOTION = True
 
-RAND_FLIP = False  # True for basic
-NCAMS = 6  # 5 for basic
-PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
-MODEL_CONFIG = {'receptive_field': 3,
-                'n_future': 3,
+if TAG == 'debug':
+    receptive_field = 2
+    n_future = 2
+
+else:
+    receptive_field = 3
+    n_future = 3
+
+
+MODEL_CONFIG = {'receptive_field': receptive_field,
+                'n_future': n_future,
                 'latent_dim': 1,
-                'action_as_input': False,
+                'predict_future_egomotion': PREDICT_FUTURE_EGOMOTION,
                 'temporal_model_name': 'temporal_block',
                 'start_out_channels': 80,
                 'extra_in_channels': 8,
                 'use_pyramid_pooling': False,
                 }
 SEQUENCE_LENGTH = MODEL_CONFIG['receptive_field'] + MODEL_CONFIG['n_future']
-MODEL_NAME = 'temporal'
+
 LEARNING_RATE = 3e-4
 N_CLASSES = 2
+MAP_LABELS = False
+RAND_FLIP = False  # True for basic
+NCAMS = 6  # 5 for basic
+PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
 WEIGHT = [1.0, 2.13]
 if MAP_LABELS:
     N_CLASSES = 4
@@ -141,12 +152,15 @@ def train(version,
     counter = 0
     for epoch in range(nepochs):
         np.random.seed()
-        for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, binimgs) in enumerate(trainloader):
-            counter = train_step(imgs, rots, trans, intrins, post_rots, post_trans, binimgs, opt, model, device,
+        for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, binimgs, future_egomotions) in enumerate(
+                trainloader):
+            counter = train_step(imgs, rots, trans, intrins, post_rots, post_trans, binimgs, future_egomotions, opt,
+                                 model, device,
                                  loss_fn, max_grad_norm, writer, epoch, valloader, val_step, logdir, counter)
 
 
-def train_step(imgs, rots, trans, intrins, post_rots, post_trans, binimgs, opt, model, device, loss_fn, max_grad_norm,
+def train_step(imgs, rots, trans, intrins, post_rots, post_trans, binimgs, future_egomotions, opt, model, device,
+               loss_fn, max_grad_norm,
                writer, epoch, valloader, val_step, logdir, counter):
     t0 = time()
     opt.zero_grad()
@@ -156,6 +170,7 @@ def train_step(imgs, rots, trans, intrins, post_rots, post_trans, binimgs, opt, 
                   intrins.to(device),
                   post_rots.to(device),
                   post_trans.to(device),
+                  future_egomotions.to(device),
                   )
     binimgs = binimgs.to(device)
 

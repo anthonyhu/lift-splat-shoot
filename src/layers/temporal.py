@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 
 from src.layers.convolutions import ConvBlock
+from src.constants import BEV_METERS
 
 
 class SpatialGRU(nn.Module):
@@ -33,12 +34,39 @@ class SpatialGRU(nn.Module):
         rnn_output = []
         rnn_state = torch.zeros(b, self.hidden_size, h, w, device=x.device) if state is None else state
         for t in range(timesteps):
+
+            if flow is not None:
+                rnn_state = self.warp_features(rnn_state, flow[:, t])
             # propagate rnn state
             rnn_state = self.gru_cell(x[:, t], rnn_state)
             rnn_output.append(rnn_state)
 
         # reshape rnn output to batch tensor
         return torch.stack(rnn_output, dim=1)
+
+    @staticmethod
+    def warp_features(state, flow):
+        b, c, h, w = state.shape
+        angle = torch.atan2(flow[:, 1, 0], flow[:, 0, 0])
+        translation = flow[:, :2, 3]
+
+        # Normalise translation to [-1, 1]
+        # -1 because the bird's-eye view axes are upside down
+        translation /= -BEV_METERS
+
+        cos_theta = torch.cos(angle)
+        sin_theta = torch.sin(angle)
+
+        # First translation then rotation.
+        # tx and ty are inverted as is the case when going from real coordinates to numpy coordinates
+        transformation = torch.stack([cos_theta, -sin_theta, translation[:, 1],
+                                      sin_theta, cos_theta, translation[:, 0]], dim=-1).view(b, 2, 3)
+
+        grid = torch.nn.functional.affine_grid(transformation, size=state.shape, align_corners=False)
+        warped_state = torch.nn.functional.grid_sample(state, grid, mode='nearest', padding_mode='zeros',
+                                                       align_corners=False)
+
+        return warped_state
 
     def gru_cell(self, x, state):
         # Compute gates
