@@ -24,13 +24,13 @@ OUTPUT_PATH = './runs/future_egomotion_gru'
 MODEL_NAME = 'temporal'
 PREDICT_FUTURE_EGOMOTION = True
 
-if TAG == 'debug':
+
+receptive_field = 3
+n_future = 3
+
+if 'direwolf' in socket.gethostname():
     receptive_field = 2
     n_future = 2
-
-else:
-    receptive_field = 3
-    n_future = 3
 
 
 MODEL_CONFIG = {'receptive_field': receptive_field,
@@ -82,6 +82,11 @@ def train(version,
             weight_decay=1e-7,
             ):
     logdir = create_session_name(output_path, tag)
+
+    print('Model config:')
+    print(MODEL_CONFIG)
+    print(f'Number of classes: {N_CLASSES}')
+
     if 'vm' in socket.gethostname():
         dataroot = '/mnt/local/datasets/nuscenes'
 
