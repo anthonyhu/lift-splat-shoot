@@ -14,17 +14,17 @@ import os
 
 from .models import compile_model
 from .data import compile_data
-from .tools import get_batch_iou, compute_miou, get_val_info
+from .tools import get_batch_iou, compute_miou, get_val_info, mat2euler
 from .utils import print_model_spec, set_module_grad
 
-BATCH_SIZE = 1
-TAG = 'debug'
-OUTPUT_PATH = './runs/future_egomotion_gru'
+BATCH_SIZE = 3
+TAG = 'train_ego_gru'
+OUTPUT_PATH = './runs/future_egomotion'
+
+PREDICT_FUTURE_EGOMOTION = True
+TEMPORAL_MODEL_NAME = 'gru'
 
 MODEL_NAME = 'temporal'
-PREDICT_FUTURE_EGOMOTION = True
-
-
 receptive_field = 3
 n_future = 3
 
@@ -37,7 +37,7 @@ MODEL_CONFIG = {'receptive_field': receptive_field,
                 'n_future': n_future,
                 'latent_dim': 1,
                 'predict_future_egomotion': PREDICT_FUTURE_EGOMOTION,
-                'temporal_model_name': 'gru',
+                'temporal_model_name': TEMPORAL_MODEL_NAME,
                 'start_out_channels': 80,
                 'extra_in_channels': 8,
                 'use_pyramid_pooling': False,
@@ -86,6 +86,7 @@ def train(version,
     print('Model config:')
     print(MODEL_CONFIG)
     print(f'Number of classes: {N_CLASSES}')
+    print(f'Session: {logdir}')
 
     if 'vm' in socket.gethostname():
         dataroot = '/mnt/local/datasets/nuscenes'
@@ -144,11 +145,16 @@ def train(version,
         print_model_spec(model.temporal_model, 'Temporal model')
         print_model_spec(model.future_prediction, 'Future prediction module')
     print_model_spec(model.bevencode, 'BEV decoder')
+    if PREDICT_FUTURE_EGOMOTION:
+        print_model_spec(model.pose_net, 'Pose net')
     print_model_spec(model, 'Total')
 
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     loss_fn = torch.nn.CrossEntropyLoss(weight=torch.Tensor(weight)).to(device)
+
+    if PREDICT_FUTURE_EGOMOTION:
+        egomotion_loss_fn = torch.nn.MSELoss()
 
     writer = SummaryWriter(logdir=logdir)
     val_step = 20 if version == 'mini' else 10000
@@ -159,69 +165,69 @@ def train(version,
         np.random.seed()
         for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, binimgs, future_egomotions) in enumerate(
                 trainloader):
-            counter = train_step(imgs, rots, trans, intrins, post_rots, post_trans, binimgs, future_egomotions, opt,
-                                 model, device,
-                                 loss_fn, max_grad_norm, writer, epoch, valloader, val_step, logdir, counter)
 
+            t0 = time()
+            opt.zero_grad()
+            out = model(imgs.to(device),
+                          rots.to(device),
+                          trans.to(device),
+                          intrins.to(device),
+                          post_rots.to(device),
+                          post_trans.to(device),
+                          future_egomotions.to(device),
+                          )
+            preds = out['bev']
+            binimgs = binimgs.to(device)
 
-def train_step(imgs, rots, trans, intrins, post_rots, post_trans, binimgs, future_egomotions, opt, model, device,
-               loss_fn, max_grad_norm,
-               writer, epoch, valloader, val_step, logdir, counter):
-    t0 = time()
-    opt.zero_grad()
-    preds = model(imgs.to(device),
-                  rots.to(device),
-                  trans.to(device),
-                  intrins.to(device),
-                  post_rots.to(device),
-                  post_trans.to(device),
-                  future_egomotions.to(device),
-                  )
-    binimgs = binimgs.to(device)
+            if MODEL_NAME == 'temporal':
+                binimgs = binimgs[:, (model.receptive_field - 1):].contiguous()
 
-    if MODEL_NAME == 'temporal':
-        binimgs = binimgs[:, (model.receptive_field - 1):].contiguous()
+                #  Pack sequence dimension
+                preds = model.pack_sequence_dim(preds).contiguous()
+                binimgs = model.pack_sequence_dim(binimgs).contiguous()
 
-        #  Pack sequence dimension
-        preds = model.pack_sequence_dim(preds).contiguous()
-        binimgs = model.pack_sequence_dim(binimgs).contiguous()
+                if PREDICT_FUTURE_EGOMOTION:
+                    future_egomotions = future_egomotions.to(device)
+                    future_egomotions = mat2euler(future_egomotions)[:, (model.receptive_field - 1):].contiguous()
 
-    loss = loss_fn(preds, binimgs)
-    loss.backward()
-    torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
-    opt.step()
-    counter += 1
-    t1 = time()
+            loss = loss_fn(preds, binimgs)
 
-    if counter % 10 == 0:
-        print(f'Iteration {counter}, loss={loss.item()}, step time ={t1 - t0}')
-        writer.add_scalar('train/loss', loss, counter)
+            if PREDICT_FUTURE_EGOMOTION:
+                loss += egomotion_loss_fn(out['future_egomotions'], future_egomotions)
 
-    if counter % 50 == 0:
-        #_, _, iou = get_batch_iou(preds, binimgs.unsqueeze(1))
-        miou = compute_miou((torch.argmax(preds, dim=1)).float().detach().cpu().numpy(), binimgs.cpu().numpy(),
-                            n_classes=N_CLASSES)
-        iou = miou['vehicles']
-        writer.add_scalar('train/iou', iou, counter)
-        writer.add_scalar('train/epoch', epoch, counter)
-        writer.add_scalar('train/step_time', t1 - t0, counter)
-        print(f'train iou: {iou}')
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+            opt.step()
+            counter += 1
+            t1 = time()
 
-    if counter % val_step == 0:
-        val_info = get_val_info(model, valloader, loss_fn, device, is_temporal=(MODEL_NAME == 'temporal'),
-                                n_classes=N_CLASSES)
-        print('VAL', val_info)
-        writer.add_scalar('val/loss', val_info['loss'], counter)
-        writer.add_scalar('val/iou', val_info['iou'], counter)
+            if counter % 10 == 0:
+                print(f'Iteration {counter}, loss={loss.item()}, step time ={t1 - t0}')
+                writer.add_scalar('train/loss', loss, counter)
 
-    if counter % val_step == 0:
-        model.eval()
-        mname = os.path.join(logdir, "model{}.pt".format(counter))
-        print('saving', mname)
-        torch.save(model.state_dict(), mname)
-        model.train()
+            if counter % 50 == 0:
+                #_, _, iou = get_batch_iou(preds, binimgs.unsqueeze(1))
+                miou = compute_miou((torch.argmax(preds, dim=1)).float().detach().cpu().numpy(), binimgs.cpu().numpy(),
+                                    n_classes=N_CLASSES)
+                iou = miou['vehicles']
+                writer.add_scalar('train/iou', iou, counter)
+                writer.add_scalar('train/epoch', epoch, counter)
+                writer.add_scalar('train/step_time', t1 - t0, counter)
+                print(f'train iou: {iou}')
 
-    return counter
+            if counter % val_step == 0:
+                val_info = get_val_info(model, valloader, loss_fn, device, is_temporal=(MODEL_NAME == 'temporal'),
+                                        n_classes=N_CLASSES)
+                print('VAL', val_info)
+                writer.add_scalar('val/loss', val_info['loss'], counter)
+                writer.add_scalar('val/iou', val_info['iou'], counter)
+
+            if counter % val_step == 0:
+                model.eval()
+                mname = os.path.join(logdir, "model{}.pt".format(counter))
+                print('saving', mname)
+                torch.save(model.state_dict(), mname)
+                model.train()
 
 
 def create_session_name(output_path, tag):

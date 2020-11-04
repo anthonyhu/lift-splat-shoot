@@ -270,9 +270,10 @@ def get_val_info(model, valloader, loss_fn, device, use_tqdm=True, is_temporal=F
                 post_trans = model.pack_sequence_dim(post_trans)
                 future_egomotions = model.pack_sequence_dim(future_egomotions)
 
-            preds = model(allimgs.to(device), rots.to(device),
+            out = model(allimgs.to(device), rots.to(device),
                           trans.to(device), intrins.to(device), post_rots.to(device),
                           post_trans.to(device), future_egomotions.to(device))
+            preds = out['bev']
             binimgs = binimgs.to(device)
 
             if repeat_baseline:
@@ -427,6 +428,33 @@ def convert_egopose_to_matrix(egopose):
     transformation_matrix[:3, 3] = translation
     transformation_matrix[3, 3] = 1.0
     return transformation_matrix
+
+
+def mat2euler(matrix: torch.Tensor):
+    """
+    Converts a 4x4 pose matrix into a 6-dof pose vector
+    Args:
+        matrix (ndarray): 4x4 pose matrix
+    Returns:
+        vector (ndarray): 6-dof pose vector comprising translation components (tx, ty, tz) and
+        rotation components (rx, ry, rz)
+    """
+
+    # M[1, 2] = -sinx*cosy, M[2, 2] = +cosx*cosy
+    rotx = torch.atan2(-matrix[..., 1, 2], matrix[..., 2, 2])
+
+    # M[0, 2] = +siny, M[1, 2] = -sinx*cosy, M[2, 2] = +cosx*cosy
+    cosy = torch.sqrt(matrix[..., 1, 2] ** 2 + matrix[..., 2, 2] ** 2)
+    roty = torch.atan2(matrix[..., 0, 2], cosy)
+
+    # M[0, 0] = +cosy*cosz, M[0, 1] = -cosy*sinz
+    rotz = torch.atan2(-matrix[..., 0, 1], matrix[..., 0, 0])
+
+    rotation = torch.stack((rotx, roty, rotz), dim=-1)
+
+    # Extract translation params
+    translation = matrix[..., :3, 3]
+    return torch.cat((translation, rotation), dim=-1)
 
 
 def compute_miou(pred, gt, n_classes=2):

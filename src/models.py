@@ -9,7 +9,7 @@ from torch import nn
 from efficientnet_pytorch import EfficientNet
 from torchvision.models.resnet import resnet18
 
-from src.layers.convolutions import ResBlock
+from src.layers.convolutions import ResBlock, ConvBlock
 from src.layers.temporal import SpatialGRU, Bottleneck3D, TemporalBlock
 from .tools import gen_dx_bx, cumsum_trick, QuickCumsum
 
@@ -263,7 +263,7 @@ class LiftSplatShoot(nn.Module):
     def forward(self, x, rots, trans, intrins, post_rots, post_trans, future_egomotions):
         x = self.get_voxels(x, rots, trans, intrins, post_rots, post_trans)
         x = self.bevencode(x)
-        return x
+        return {'bev': x}
 
 
 class TemporalModel(nn.Module):
@@ -375,6 +375,30 @@ class FuturePrediction(torch.nn.Module):
         return x
 
 
+class PoseNet(nn.Module):
+    def __init__(self, in_channels):
+        super().__init__()
+
+        self.module = nn.Sequential(
+            ConvBlock(in_channels, 64, 7, 2),
+            ConvBlock(64, 64, 5, 2),
+            ConvBlock(64, 64, 3, 2),
+            ConvBlock(64, 128, 3, 2),
+            ConvBlock(128, 256, 3, 2),
+            ConvBlock(256, 256, 3, 2),
+            ConvBlock(256, 256, 3, 2),
+            nn.Conv2d(256, 6, 1),
+        )
+
+    def forward(self, x):
+        out = self.module(x)
+        out = out.mean(3).mean(2)
+
+        out = 0.01 * out.view(-1, 6)
+
+        return out
+
+
 class TemporalLiftSplatShoot(LiftSplatShoot):
     def __init__(self, grid_conf, data_aug_conf, outC, model_config):
         super().__init__(grid_conf, data_aug_conf, outC)
@@ -405,7 +429,11 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
 
         self.bevencode = BevEncode(inC=future_pred_in_channels, outC=outC)
 
+        if self.predict_future_egomotion:
+            self.pose_net = PoseNet(future_pred_in_channels)
+
     def forward(self, imgs, rots, trans, intrins, post_rots, post_trans, future_egomotions):
+        output = {}
         b, s, n, c, h, w = imgs.shape
         # Reshape
         imgs = self.pack_sequence_dim(imgs)
@@ -444,7 +472,14 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         # Predict bev segmentations
         bev_output = self.bevencode(z_future)
         bev_output = self.unpack_sequence_dim(bev_output, b, new_s)
-        return bev_output
+        output['bev'] = bev_output
+
+        if self.predict_future_egomotion:
+            future_egomotions = self.pose_net(z_future)
+            future_egomotions = self.unpack_sequence_dim(future_egomotions, b, new_s)
+            output['future_egomotions'] = future_egomotions
+
+        return output
 
 
 def compile_model(grid_conf, data_aug_conf, outC, name='basic', model_config={}):
