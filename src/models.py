@@ -296,39 +296,44 @@ class TemporalModel(nn.Module):
                                  SpatialGRU(self.in_channels, self.in_channels, norm=self.norm,
                                             activation=self.activation),
                                  )
+        elif self.name == 'temporal_block':
+            h, w = self.input_shape
+            modules = []
 
-        h, w = self.input_shape
-        modules = []
+            block_in_channels = self.in_channels
+            block_out_channels = self.start_out_channels
 
-        block_in_channels = self.in_channels
-        block_out_channels = self.start_out_channels
+            for _ in range(self.n_temporal_layers):
+                if self.use_pyramid_pooling:
+                    use_pyramid_pooling = True
+                    pool_sizes = [(2, h, w), (2, h // 2, w // 2), (2, h // 4, w // 4)]
+                else:
+                    use_pyramid_pooling = False
+                    pool_sizes = None
+                temporal = TemporalBlock(block_in_channels, block_out_channels, use_pyramid_pooling=use_pyramid_pooling,
+                                         pool_sizes=pool_sizes)
+                spatial = [Bottleneck3D(block_out_channels, block_out_channels, kernel_size=(1, 3, 3))
+                           for _ in range(self.n_spatial_layers_between_temporal_layers)]
+                temporal_spatial_layers = nn.Sequential(temporal, *spatial)
+                modules.extend(temporal_spatial_layers)
 
-        for _ in range(self.n_temporal_layers):
-            if self.use_pyramid_pooling:
-                use_pyramid_pooling = True
-                pool_sizes = [(2, h, w), (2, h // 2, w // 2), (2, h // 4, w // 4)]
-            else:
-                use_pyramid_pooling = False
-                pool_sizes = None
-            temporal = TemporalBlock(block_in_channels, block_out_channels, use_pyramid_pooling=use_pyramid_pooling,
-                                     pool_sizes=pool_sizes)
-            spatial = [Bottleneck3D(block_out_channels, block_out_channels, kernel_size=(1, 3, 3))
-                       for _ in range(self.n_spatial_layers_between_temporal_layers)]
-            temporal_spatial_layers = nn.Sequential(temporal, *spatial)
-            modules.extend(temporal_spatial_layers)
+                block_in_channels = block_out_channels
+                block_out_channels += self.extra_in_channels
+            return nn.Sequential(*modules)
+        elif self.name == 'identity':
+            return nn.Sequential()
 
-            block_in_channels = block_out_channels
-            block_out_channels += self.extra_in_channels
-        return nn.Sequential(*modules)
 
     def forward(self, x):
         if self.name == 'gru':
             return self.model(x)
-        else:
+        elif self.name == 'temporal_block':
             # Reshape input tensor to (batch, C, time, H, W)
             x = x.permute(0, 2, 1, 3, 4)
             z = self.model(x)
             return z.permute(0, 2, 1, 3, 4).contiguous()
+        else:
+            return x
 
     @property
     def receptive_field(self):
@@ -456,6 +461,7 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         self.latent_dim = model_config['latent_dim']  # 16
         self.predict_future_egomotion = model_config['predict_future_egomotion']  # False
         self.temporal_model_name = model_config['temporal_model_name']  # gru
+        self.disable_bev_prediction = model_config['disable_bev_prediction']
         self.start_out_channels = model_config['start_out_channels']  # 80
         self.extra_in_channels = model_config['extra_in_channels']  # 8
         self.use_pyramid_pooling = model_config['use_pyramid_pooling']  # False
@@ -466,16 +472,21 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
 
         if self.temporal_model_name == 'gru':
             future_pred_in_channels = self.camC
-        else:
+        elif self.temporal_model_name == 'temporal_block':
             future_pred_in_channels = (self.start_out_channels
                                        + self.extra_in_channels * (self.receptive_field - 2))
+        elif self.temporal_model_name == 'identity':
+            future_pred_in_channels = self.camC
+        else:
+            raise ValueError(f'Unknown temporal model: {self.temporal_model_name}')
 
         self.future_prediction = FuturePrediction(
             in_channels=future_pred_in_channels, latent_dim=self.latent_dim,
             predict_future_egomotion=self.predict_future_egomotion,
         )
 
-        self.bevencode = BevEncode(inC=future_pred_in_channels, outC=outC)
+        if not self.disable_bev_prediction:
+            self.bevencode = BevEncode(inC=future_pred_in_channels, outC=outC)
 
         if self.predict_future_egomotion:
             self.pose_net = PoseNet(future_pred_in_channels)
@@ -519,9 +530,10 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         z_future = self.pack_sequence_dim(z_future)
 
         # Predict bev segmentations
-        bev_output = self.bevencode(z_future)
-        bev_output = self.unpack_sequence_dim(bev_output, b, new_s)
-        output['bev'] = bev_output
+        if not self.disable_bev_prediction:
+            bev_output = self.bevencode(z_future)
+            bev_output = self.unpack_sequence_dim(bev_output, b, new_s)
+            output['bev'] = bev_output
 
         if self.predict_future_egomotion and not inference:
             pred_future_egomotions = self.pose_net(z_future)

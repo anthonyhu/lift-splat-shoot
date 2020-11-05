@@ -41,3 +41,4 @@ dependencies:
     - tensorboardY==0.1.9
     - nuscenes-devkit==1.1.0
     - efficientnet-pytorch==0.7.0
+    - gpustat==0.6.0

@@ -17,13 +17,14 @@ from .data import compile_data
 from .tools import get_batch_iou, compute_miou, get_val_info, mat2pose_vec
 from .utils import print_model_spec, set_module_grad
 
-BATCH_SIZE = 1
-TAG = 'debug'
-OUTPUT_PATH = './runs/debug'
-DATAROOT = '/data/cvfs/ah2029/datasets/nuscenes'
+BATCH_SIZE = 3
+TAG = 'identity_temporal_model'
+OUTPUT_PATH = './runs/future_egomotion'
+
 
 PREDICT_FUTURE_EGOMOTION = True
-TEMPORAL_MODEL_NAME = 'gru'
+TEMPORAL_MODEL_NAME = 'identity'
+DISABLE_BEV_PREDICTION = False
 
 MODEL_NAME = 'temporal'
 receptive_field = 3
@@ -39,6 +40,7 @@ MODEL_CONFIG = {'receptive_field': receptive_field,
                 'latent_dim': 1,
                 'predict_future_egomotion': PREDICT_FUTURE_EGOMOTION,
                 'temporal_model_name': TEMPORAL_MODEL_NAME,
+                'disable_bev_prediction': DISABLE_BEV_PREDICTION,
                 'start_out_channels': 80,
                 'extra_in_channels': 8,
                 'use_pyramid_pooling': False,
@@ -50,6 +52,7 @@ N_CLASSES = 2
 MAP_LABELS = False
 RAND_FLIP = False  # True for basic
 NCAMS = 6  # 5 for basic
+DATAROOT = '/data/cvfs/ah2029/datasets/nuscenes'
 PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
 WEIGHT = [1.0, 2.13]
 if MAP_LABELS:
@@ -178,21 +181,26 @@ def train(version,
                           post_trans.to(device),
                           future_egomotions.to(device),
                           )
-            preds = out['bev']
+
+            if not DISABLE_BEV_PREDICTION:
+                preds = out['bev']
             binimgs = binimgs.to(device)
 
             if MODEL_NAME == 'temporal':
                 binimgs = binimgs[:, (model.receptive_field - 1):].contiguous()
 
                 #  Pack sequence dimension
-                preds = model.pack_sequence_dim(preds).contiguous()
+                if not DISABLE_BEV_PREDICTION:
+                    preds = model.pack_sequence_dim(preds).contiguous()
                 binimgs = model.pack_sequence_dim(binimgs).contiguous()
 
                 if PREDICT_FUTURE_EGOMOTION:
                     future_egomotions = future_egomotions.to(device)
                     future_egomotions = mat2pose_vec(future_egomotions)[:, (model.receptive_field - 1):].contiguous()
 
-            loss = loss_fn(preds, binimgs)
+            loss = torch.zeros(1, dtype=torch.float32).to(device)
+            if not DISABLE_BEV_PREDICTION:
+                loss += loss_fn(preds, binimgs)
 
             if PREDICT_FUTURE_EGOMOTION:
                 loss += egomotion_loss_fn(out['future_egomotions'], future_egomotions)
@@ -207,19 +215,20 @@ def train(version,
                 print(f'Iteration {counter}, loss={loss.item()}, step time ={t1 - t0}')
                 writer.add_scalar('train/loss', loss, counter)
 
-            if counter % 50 == 0:
+            if counter % 20 == 0:
                 #_, _, iou = get_batch_iou(preds, binimgs.unsqueeze(1))
-                miou = compute_miou((torch.argmax(preds, dim=1)).float().detach().cpu().numpy(), binimgs.cpu().numpy(),
-                                    n_classes=N_CLASSES)
-                iou = miou['vehicles']
-                writer.add_scalar('train/iou', iou, counter)
-                writer.add_scalar('train/epoch', epoch, counter)
-                writer.add_scalar('train/step_time', t1 - t0, counter)
-                print(f'train iou: {iou}')
+                if not DISABLE_BEV_PREDICTION:
+                    miou = compute_miou((torch.argmax(preds, dim=1)).float().detach().cpu().numpy(), binimgs.cpu().numpy(),
+                                        n_classes=N_CLASSES)
+                    iou = miou['vehicles']
+                    writer.add_scalar('train/iou', iou, counter)
+                    writer.add_scalar('train/epoch', epoch, counter)
+                    writer.add_scalar('train/step_time', t1 - t0, counter)
+                    print(f'train iou: {iou}')
 
             if counter % val_step == 0:
                 val_info = get_val_info(model, valloader, loss_fn, device, is_temporal=(MODEL_NAME == 'temporal'),
-                                        n_classes=N_CLASSES)
+                                        n_classes=N_CLASSES, egomotion_loss_fn=egomotion_loss_fn)
                 print('VAL', val_info)
                 writer.add_scalar('val/loss', val_info['loss'], counter)
                 writer.add_scalar('val/iou', val_info['iou'], counter)

@@ -246,7 +246,7 @@ def get_batch_iou(preds, binimgs):
 
 
 def get_val_info(model, valloader, loss_fn, device, use_tqdm=True, is_temporal=False, repeat_baseline=False,
-                 receptive_field=0, n_classes=0):
+                 receptive_field=0, n_classes=0, egomotion_loss_fn=None):
     t0 = time()
     model.eval()
     total_loss = 0.0
@@ -273,7 +273,9 @@ def get_val_info(model, valloader, loss_fn, device, use_tqdm=True, is_temporal=F
             out = model(allimgs.to(device), rots.to(device),
                           trans.to(device), intrins.to(device), post_rots.to(device),
                           post_trans.to(device), future_egomotions.to(device))
-            preds = out['bev']
+
+            if not model.disable_bev_prediction:
+                preds = out['bev']
             binimgs = binimgs.to(device)
 
             if repeat_baseline:
@@ -293,26 +295,39 @@ def get_val_info(model, valloader, loss_fn, device, use_tqdm=True, is_temporal=F
                 binimgs = binimgs[:, (model.receptive_field - 1):].contiguous()
 
                 #  Pack sequence dimension
-                preds = model.pack_sequence_dim(preds).contiguous()
+                if not model.disable_bev_prediction:
+                    preds = model.pack_sequence_dim(preds).contiguous()
                 binimgs = model.pack_sequence_dim(binimgs).contiguous()
 
+                if model.predict_future_egomotion:
+                    future_egomotions = future_egomotions.to(device)
+                    future_egomotions = mat2pose_vec(future_egomotions)[:, (model.receptive_field - 1):].contiguous()
+
             # loss
-            total_loss += loss_fn(preds, binimgs).item() * preds.shape[0]
+            loss = torch.zeros(1, dtype=torch.float32).to(device)
+            if not model.disable_bev_prediction:
+                loss += loss_fn(preds, binimgs)
+
+            if model.predict_future_egomotion:
+                loss += egomotion_loss_fn(out['future_egomotions'], future_egomotions)
+
+            total_loss += loss.item()
 
             # iou
             # intersect, union, _ = get_batch_iou(preds, binimgs)
             # total_intersect += intersect
             # total_union += union
-            miou = compute_miou((torch.argmax(preds, dim=1)).float().detach().cpu().numpy(), binimgs.cpu().numpy(),
-                                n_classes=n_classes)
-            total_iou += miou['vehicles']
+            if not model.disable_bev_prediction:
+                miou = compute_miou((torch.argmax(preds, dim=1)).float().detach().cpu().numpy(), binimgs.cpu().numpy(),
+                                    n_classes=n_classes)
+                total_iou += miou['vehicles']
 
     model.train()
     t1 = time()
     print(f'Evaluation on the validation set took: {(t1 - t0) / 60}mins')
 
     return {
-            'loss': total_loss / len(valloader.dataset),
+            'loss': total_loss / len(valloader),
             #'iou': total_intersect / total_union,
             'iou': total_iou / len(valloader),
             }
