@@ -127,7 +127,6 @@ dmypy.json
 # other things
 *.jpg
 *.png
-*.pt
 *.json
 runs/
 goodmodel.pt.bak
@@ -137,4 +136,3 @@ imagenet_pretrained/
 *.csv
 
 .idea
-*.ipynb

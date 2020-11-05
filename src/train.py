@@ -17,10 +17,10 @@ from .data import compile_data
 from .tools import get_batch_iou, compute_miou, get_val_info, mat2euler
 from .utils import print_model_spec, set_module_grad
 
-BATCH_SIZE = 3
-TAG = 'train_ego_gru'
-OUTPUT_PATH = './runs/future_egomotion'
-DATAROOT = '/data/cvfs/ah2029/datasets/nuscenes'
+BATCH_SIZE = 1
+TAG = 'debug'
+OUTPUT_PATH = './runs/debug'
+DATAROOT = '/mnt/remote/data/users/anthony/datasets/nuscenes'
 
 PREDICT_FUTURE_EGOMOTION = False
 TEMPORAL_MODEL_NAME = 'gru'
