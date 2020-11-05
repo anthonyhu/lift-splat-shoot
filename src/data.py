@@ -191,29 +191,43 @@ class NuscData(torch.utils.data.Dataset):
                        nsweeps=nsweeps, min_distance=2.2)
         return torch.Tensor(pts)[:3]  # x,y,z
 
-    def get_binimg(self, rec):
-        egopose = self.nusc.get('ego_pose',
-                                self.nusc.get('sample_data', rec['data']['LIDAR_TOP'])['ego_pose_token'])
+    def _get_top_lidar_pose(self, rec):
+        egopose = self.nusc.get('ego_pose', self.nusc.get('sample_data', rec['data']['LIDAR_TOP'])['ego_pose_token'])
         trans = -np.array(egopose['translation'])
         rot = Quaternion(egopose['rotation']).inverse
-        img = np.zeros((self.nx[0], self.nx[1]))
-        for tok in rec['anns']:
-            inst = self.nusc.get('sample_annotation', tok)
-            # add category for lyft
-            if not inst['category_name'].split('.')[0] == 'vehicle':
-                continue
-            box = Box(inst['translation'], inst['size'], Quaternion(inst['rotation']))
-            box.translate(trans)
-            box.rotate(rot)
+        return trans, rot
 
-            pts = box.bottom_corners()[:2].T
-            pts = np.round(
-                (pts - self.bx[:2] + self.dx[:2]/2.) / self.dx[:2]
-                ).astype(np.int32)
-            pts[:, [1, 0]] = pts[:, [0, 1]]
-            cv2.fillPoly(img, [pts], 1.0)
+    def get_occupancy_map_and_instance_labels(self, rec, instance_map={}):
+        translation, rotation = self._get_top_lidar_pose(rec)
+        bin_image = np.zeros((self.nx[0], self.nx[1]))
+        instance_image = -1*np.ones((self.nx[0], self.nx[1]))
+        for annotation_token in rec['anns']:
 
-        return torch.Tensor(img).long()
+            annotation = self.nusc.get('sample_annotation', annotation_token)
+            
+            if annotation['instance_token'] not in instance_map:
+                instance_map[annotation['instance_token']] = len(instance_map)
+            
+            instance_id = instance_map[annotation['instance_token']]
+            
+            poly_region = self._get_poly_region_in_image(annotation, translation, rotation) 
+            cv2.fillPoly(instance_image, [poly_region], instance_id)
+            cv2.fillPoly(bin_image, [poly_region], 1.0)
+        
+        return bin_image, instance_image, instance_map
+
+    def _get_poly_region_in_image(self, instance_annotation, ego_translation, ego_rotation):
+        box = Box(instance_annotation['translation'], instance_annotation['size'], Quaternion(instance_annotation['rotation']))
+        box.translate(ego_translation)
+        box.rotate(ego_rotation)
+
+        pts = box.bottom_corners()[:2].T
+        pts = np.round(
+            (pts - self.bx[:2] + self.dx[:2]/2.) / self.dx[:2]
+            ).astype(np.int32)
+        pts[:, [1, 0]] = pts[:, [0, 1]]
+        return pts
+
 
     def get_static_label(self, rec, index):
         print(f'Generating static scene for dataset {self.mode} and index={index}')
@@ -288,25 +302,27 @@ class NuscData(torch.utils.data.Dataset):
         label = torch.Tensor(label).long()
         return label
 
-    def get_label(self, rec, index):
-        return self.get_binimg(rec)
+    def get_label(self, rec, index, instance_map={}):
+        bin_image_np, instance_image_np, instance_map = self.get_occupancy_map_and_instance_labels(rec, instance_map)
+        bin_image = torch.from_numpy(bin_image_np)
+        instance_image = torch.from_numpy(instance_image_np)
+        return bin_image, instance_image, instance_map
         # Load saved labels
-        label_path = os.path.join(self.dataroot, 'bev_label', self.mode, f'bev_label_{index:08d}.png')
+        # label_path = os.path.join(self.dataroot, 'bev_label', self.mode, f'bev_label_{index:08d}.png')
 
-        if os.path.isfile(label_path):
-            label = np.asarray(Image.open(label_path)).astype(np.int64)
-            label = torch.Tensor(label).long()
-            return label
+        # if os.path.isfile(label_path):
+        #     label = np.asarray(Image.open(label_path)).astype(np.int64)
+        #     label = torch.Tensor(label).long()
+        #     return label
 
-        print(f'Generating labels for index {index}')
-        binimg = self.get_binimg(rec)
-        if self.map_labels:
-            static_label = self.get_static_label(rec, index)
-            # Add car labels
-            static_label[binimg == 1] = VEHICLES_ID
-            label = static_label
+        # binimg = self.get_binimg(rec)
+        # if self.map_labels:
+        #     static_label = self.get_static_label(rec, index)
+        #     # Add car labels
+        #     static_label[binimg == 1] = VEHICLES_ID
+        #     label = static_label
 
-        return label
+        # return label
 
     def get_future_egomotion(self, rec, index):
         rec_t0 = rec
@@ -359,6 +375,7 @@ class VizData(NuscData):
         imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
         lidar_data = self.get_lidar_data(rec, nsweeps=3)
         binimg = self.get_binimg(rec)
+        instance_image = self.get_instances(rec)
         
         return imgs, rots, trans, intrins, post_rots, post_trans, lidar_data, binimg
 
@@ -373,15 +390,19 @@ class SegmentationData(NuscData):
         cams = self.choose_cams()
         imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
         binimg = self.get_label(rec, index)
+        
+        binimg, instance_image, instance_map = self.get_label(rec, index)
         future_egomotion = self.get_future_egomotion(rec, index)
         
-        return imgs, rots, trans, intrins, post_rots, post_trans, binimg, future_egomotion
+        return imgs, rots, trans, intrins, post_rots, post_trans, binimg, future_egomotion, instance_image, instance_map
 
 
 class SequentialSegmentationData(SegmentationData):
     def __getitem__(self, index):
         list_imgs, list_rots, list_trans, list_intrins = [], [], [], []
         list_post_rots, list_post_trans, list_binimg, list_future_egomotion = [], [], [], []
+        list_instance_img = []
+        instance_map = {}
         cams = self.choose_cams()
 
         previous_rec = None
@@ -401,7 +422,7 @@ class SequentialSegmentationData(SegmentationData):
                     index_t = previous_index_t
 
             imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
-            binimg = self.get_label(rec, index_t)
+            binimg, instance_image, instance_map = self.get_label(rec, index_t, instance_map)
             future_egomotion = self.get_future_egomotion(rec, index_t)
 
             list_imgs.append(imgs)
@@ -412,6 +433,7 @@ class SequentialSegmentationData(SegmentationData):
             list_post_trans.append(post_trans)
             list_binimg.append(binimg)
             list_future_egomotion.append(future_egomotion)
+            list_instance_img.append(instance_image)
 
             previous_rec = rec
             previous_index_t = index_t
@@ -422,9 +444,10 @@ class SequentialSegmentationData(SegmentationData):
         list_post_rots, list_post_trans, list_binimg = torch.stack(list_post_rots), torch.stack(list_post_trans), \
                                                        torch.stack(list_binimg)
         list_future_egomotion = torch.stack(list_future_egomotion)
+        list_instance_img = torch.stack(list_instance_img)
 
         return (list_imgs, list_rots, list_trans, list_intrins, list_post_rots, list_post_trans, list_binimg,
-                list_future_egomotion)
+                list_future_egomotion, list_instance_img, instance_map)
 
 
 
