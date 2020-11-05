@@ -17,11 +17,11 @@ from .tools import (ego_to_cam, get_only_in_img_mask, denormalize_img,
                     get_nusc_maps, plot_nusc_map)
 from .models import compile_model
 
-from .train import N_CLASSES
+from .train import N_CLASSES, DATAROOT, PRETRAINED_MODEL_WEIGHTS, MODEL_NAME, SEQUENCE_LENGTH
 
 
 def lidar_check(version,
-                dataroot='/data/cvfs/ah2029/datasets/nuscenes',
+                dataroot=DATAROOT,
                 show_lidar=True,
                 viz_train=False,
                 nepochs=1,
@@ -122,86 +122,9 @@ def lidar_check(version,
                 plt.savefig(imname)
 
 
-def cumsum_check(version,
-                dataroot='/data/cvfs/ah2029/datasets/nuscenes',
-
-                H=900, W=1600,
-                resize_lim=(0.193, 0.225),
-                final_dim=(128, 352),
-                bot_pct_lim=(0.0, 0.22),
-                rot_lim=(-5.4, 5.4),
-                rand_flip=True,
-
-                xbound=[-50.0, 50.0, 0.5],
-                ybound=[-50.0, 50.0, 0.5],
-                zbound=[-10.0, 10.0, 20.0],
-                dbound=[4.0, 45.0, 1.0],
-
-                bsz=4,
-                nworkers=6,
-                ):
-
-    if 'vm' in socket.gethostname():
-        dataroot = '/mnt/local/datasets/nuscenes'
-    grid_conf = {
-        'xbound': xbound,
-        'ybound': ybound,
-        'zbound': zbound,
-        'dbound': dbound,
-    }
-    data_aug_conf = {
-                    'resize_lim': resize_lim,
-                    'final_dim': final_dim,
-                    'rot_lim': rot_lim,
-                    'H': H, 'W': W,
-                    'rand_flip': rand_flip,
-                    'bot_pct_lim': bot_pct_lim,
-                    'cams': ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT',
-                             'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT'],
-                    'Ncams': 6,
-                }
-    trainloader, valloader = compile_data(version, dataroot, data_aug_conf=data_aug_conf,
-                                          grid_conf=grid_conf, bsz=bsz, nworkers=nworkers,
-                                          parser_name='segmentationdata')
-
-    device = torch.device(f'cuda:0')
-    loader = trainloader
-
-    model = compile_model(grid_conf, data_aug_conf, outC=N_CLASSES)
-    model.to(device)
-
-    model.eval()
-    for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, binimgs, future_egomotions) in enumerate(loader):
-
-        model.use_quickcumsum = False
-        model.zero_grad()
-        out = model(imgs.to(device),
-                rots.to(device),
-                trans.to(device),
-                intrins.to(device),
-                post_rots.to(device),
-                post_trans.to(device),
-                )
-        out.mean().backward()
-        print('autograd:    ', out.mean().detach().item(), model.camencode.depthnet.weight.grad.mean().item())
-
-        model.use_quickcumsum = True
-        model.zero_grad()
-        out = model(imgs.to(device),
-                rots.to(device),
-                trans.to(device),
-                intrins.to(device),
-                post_rots.to(device),
-                post_trans.to(device),
-                )
-        out.mean().backward()
-        print('quick cumsum:', out.mean().detach().item(), model.camencode.depthnet.weight.grad.mean().item())
-        print()
-
-
 def eval_model_iou(version,
-                modelf='./model_weights/model525000.pt',
-                dataroot='/data/cvfs/ah2029/datasets/nuscenes',
+                modelf=PRETRAINED_MODEL_WEIGHTS,
+                dataroot=DATAROOT,
 
                 H=900, W=1600,
                 resize_lim=(0.193, 0.225),
@@ -239,10 +162,14 @@ def eval_model_iou(version,
                              'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT'],
                     'Ncams': 5,
                 }
+    if MODEL_NAME == 'temporal':
+        parser_name = 'sequentialsegmentationdata'
+    else:
+        parser_name = 'segmentationdata'
     trainloader, valloader = compile_data(version, dataroot, data_aug_conf=data_aug_conf,
                                           grid_conf=grid_conf, bsz=bsz, nworkers=nworkers,
-                                          parser_name='sequentialsegmentationdata',
-                                          sequence_length=6)
+                                          parser_name=parser_name,
+                                          sequence_length=SEQUENCE_LENGTH)
 
     device = torch.device('cuda:0')
 
@@ -254,14 +181,14 @@ def eval_model_iou(version,
     loss_fn = torch.nn.CrossEntropyLoss().cuda()
 
     model.eval()
-    val_info = get_val_info(model, valloader, loss_fn, device, is_temporal=False, repeat_baseline=True,
-                            receptive_field=3, n_classes=N_CLASSES)
+    val_info = get_val_info(model, valloader, loss_fn, device, is_temporal=False, repeat_baseline=False,
+                            receptive_field=0, n_classes=N_CLASSES)
     print(val_info)
 
 
 def viz_model_preds(version,
-                    modelf='model_weights/model525000.pt',
-                    dataroot='/data/cvfs/ah2029/datasets/nuscenes',
+                    modelf=PRETRAINED_MODEL_WEIGHTS,
+                    dataroot=DATAROOT,
                     viz_train=False,
 
                     H=900, W=1600,

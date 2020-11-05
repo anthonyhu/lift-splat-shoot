@@ -20,11 +20,12 @@ from .utils import print_model_spec, set_module_grad
 BATCH_SIZE = 3
 TAG = 'train_ego_gru'
 OUTPUT_PATH = './runs/future_egomotion'
+DATAROOT = '/data/cvfs/ah2029/datasets/nuscenes'
 
-PREDICT_FUTURE_EGOMOTION = True
+PREDICT_FUTURE_EGOMOTION = False
 TEMPORAL_MODEL_NAME = 'gru'
 
-MODEL_NAME = 'temporal'
+MODEL_NAME = 'basic'
 receptive_field = 3
 n_future = 3
 
@@ -57,7 +58,7 @@ if MAP_LABELS:
 
 
 def train(version,
-            dataroot='/data/cvfs/ah2029/datasets/nuscenes',
+            dataroot=DATAROOT,
             nepochs=10000,
 
             H=900, W=1600,
@@ -144,6 +145,7 @@ def train(version,
     if MODEL_NAME == 'temporal':
         print_model_spec(model.temporal_model, 'Temporal model')
         print_model_spec(model.future_prediction, 'Future prediction module')
+
     print_model_spec(model.bevencode, 'BEV decoder')
     if PREDICT_FUTURE_EGOMOTION:
         print_model_spec(model.pose_net, 'Pose net')

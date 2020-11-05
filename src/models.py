@@ -456,10 +456,9 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         b, _, h, w = hidden_state.shape
         latent_tensor = hidden_state.new_zeros(b, self.n_future, self.latent_dim, h, w)
 
+        # shape (b, n_future, 88, 200, 200)
         z_future = self.future_prediction(latent_tensor, hidden_state,
-                                          future_egomotions[:, (self.receptive_field - 1):-1])  # shape (b, n_future,
-        # 256,
-        # 10, 24)
+                                          future_egomotions[:, (self.receptive_field - 1):-1])
 
         # Decode present
         z_t = hidden_state.unsqueeze(1)
