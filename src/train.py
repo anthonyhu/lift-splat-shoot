@@ -14,18 +14,18 @@ import os
 
 from .models import compile_model
 from .data import compile_data
-from .tools import get_batch_iou, compute_miou, get_val_info, mat2euler
+from .tools import get_batch_iou, compute_miou, get_val_info, mat2pose_vec
 from .utils import print_model_spec, set_module_grad
 
-BATCH_SIZE = 3
-TAG = 'train_ego_gru'
-OUTPUT_PATH = './runs/future_egomotion'
+BATCH_SIZE = 1
+TAG = 'debug'
+OUTPUT_PATH = './runs/debug'
 DATAROOT = '/data/cvfs/ah2029/datasets/nuscenes'
 
-PREDICT_FUTURE_EGOMOTION = False
+PREDICT_FUTURE_EGOMOTION = True
 TEMPORAL_MODEL_NAME = 'gru'
 
-MODEL_NAME = 'basic'
+MODEL_NAME = 'temporal'
 receptive_field = 3
 n_future = 3
 
@@ -190,7 +190,7 @@ def train(version,
 
                 if PREDICT_FUTURE_EGOMOTION:
                     future_egomotions = future_egomotions.to(device)
-                    future_egomotions = mat2euler(future_egomotions)[:, (model.receptive_field - 1):].contiguous()
+                    future_egomotions = mat2pose_vec(future_egomotions)[:, (model.receptive_field - 1):].contiguous()
 
             loss = loss_fn(preds, binimgs)
 

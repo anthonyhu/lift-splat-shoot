@@ -11,7 +11,7 @@ from torchvision.models.resnet import resnet18
 
 from src.layers.convolutions import ResBlock, ConvBlock
 from src.layers.temporal import SpatialGRU, Bottleneck3D, TemporalBlock
-from .tools import gen_dx_bx, cumsum_trick, QuickCumsum
+from .tools import gen_dx_bx, cumsum_trick, QuickCumsum, pose_vec2mat
 
 
 class Up(nn.Module):
@@ -356,23 +356,71 @@ class FuturePrediction(torch.nn.Module):
         self.spatial_grus = torch.nn.ModuleList(self.spatial_grus)
         self.res_blocks = torch.nn.ModuleList(self.res_blocks)
 
-    def forward(self, x, hidden_state, future_egomotions):
+    def forward(self, x, hidden_state, future_egomotions, inference=False, pose_net=None):
         # pylint: disable=arguments-differ
         # x has shape (b, n_future, c, h, w), hidden_state (b, c, h, w)
-        for i in range(self.n_gru_blocks):
+        if not inference:
+            for i in range(self.n_gru_blocks):
+                if self.predict_future_egomotion and i == 0:
+                    # Warp features with respect to future ego-motion
+                    flow = future_egomotions
+                else:
+                    flow = None
 
-            if self.predict_future_egomotion and i == 0:
-                # Warp features with respect to future ego-motion
-                flow = future_egomotions
-            else:
-                flow = None
+                x = self.spatial_grus[i](x, hidden_state, flow)
+                b, n_future, c, h, w = x.shape
 
-            x = self.spatial_grus[i](x, hidden_state, flow)
-            b, n_future, c, h, w = x.shape
+                x = self.res_blocks[i](x.view(b * n_future, c, h, w))
+                x = x.view(b, n_future, c, h, w)
 
-            x = self.res_blocks[i](x.view(b * n_future, c, h, w))
-            x = x.view(b, n_future, c, h, w)
-        return x
+            return x, None
+
+        else:
+            # Use predicted future ego-motion to warp features in a recursive manner
+            output = []
+            pred_future_egomotions = []
+            intermediate_states = {}
+            n_future = x.shape[1]
+
+            initial_hidden_state = hidden_state
+
+            # This is our Markovian state
+            hidden_state_t = initial_hidden_state
+
+            for t in range(n_future):
+                for i in range(self.n_gru_blocks):
+                    if i == 0:
+                        # Compute future egomotion
+                        flow_t = pose_net(hidden_state_t)
+                        flow_t = pose_vec2mat(flow_t)
+                        # Warp features
+                        hidden_state_previous = self.spatial_grus[i].warp_features(hidden_state_t, flow_t)
+                        pred_future_egomotions.append(flow_t)
+
+                        gru_input = x[:, t]
+                    else:
+                        if t == 0:
+                            hidden_state_previous = initial_hidden_state
+                        else:
+                            hidden_state_previous = intermediate_states[(t-1, i)]
+                        gru_input = hidden_state_next
+
+
+                    hidden_state_next = self.spatial_grus[i].gru_cell(gru_input, hidden_state_previous)
+
+                    intermediate_states[(t, i)] = hidden_state_next
+
+                    hidden_state_next = self.res_blocks[i](hidden_state_next)
+
+                # New markovian state at the end of all the gru forwards
+                hidden_state_t = hidden_state_next
+
+                output.append(hidden_state_t)
+
+            output = torch.stack(output, dim=1)
+            pred_future_egomotions = torch.stack(pred_future_egomotions, dim=1)
+
+            return output, pred_future_egomotions
 
 
 class PoseNet(nn.Module):
@@ -432,7 +480,7 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         if self.predict_future_egomotion:
             self.pose_net = PoseNet(future_pred_in_channels)
 
-    def forward(self, imgs, rots, trans, intrins, post_rots, post_trans, future_egomotions):
+    def forward(self, imgs, rots, trans, intrins, post_rots, post_trans, future_egomotions, inference=False):
         output = {}
         b, s, n, c, h, w = imgs.shape
         # Reshape
@@ -457,8 +505,10 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         latent_tensor = hidden_state.new_zeros(b, self.n_future, self.latent_dim, h, w)
 
         # shape (b, n_future, 88, 200, 200)
-        z_future = self.future_prediction(latent_tensor, hidden_state,
-                                          future_egomotions[:, (self.receptive_field - 1):-1])
+        z_future, pred_future_egomotions = self.future_prediction(
+            latent_tensor, hidden_state, future_egomotions[:, (self.receptive_field - 1):-1],
+            inference=inference, pose_net=self.pose_net,
+        )
 
         # Decode present
         z_t = hidden_state.unsqueeze(1)
@@ -473,10 +523,11 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         bev_output = self.unpack_sequence_dim(bev_output, b, new_s)
         output['bev'] = bev_output
 
-        if self.predict_future_egomotion:
-            future_egomotions = self.pose_net(z_future)
-            future_egomotions = self.unpack_sequence_dim(future_egomotions, b, new_s)
-            output['future_egomotions'] = future_egomotions
+        if self.predict_future_egomotion and not inference:
+            pred_future_egomotions = self.pose_net(z_future)
+            pred_future_egomotions = self.unpack_sequence_dim(pred_future_egomotions, b, new_s)
+
+        output['future_egomotions'] = pred_future_egomotions
 
         return output
 

@@ -430,7 +430,7 @@ def convert_egopose_to_matrix(egopose):
     return transformation_matrix
 
 
-def mat2euler(matrix: torch.Tensor):
+def mat2pose_vec(matrix: torch.Tensor):
     """
     Converts a 4x4 pose matrix into a 6-dof pose vector
     Args:
@@ -455,6 +455,57 @@ def mat2euler(matrix: torch.Tensor):
     # Extract translation params
     translation = matrix[..., :3, 3]
     return torch.cat((translation, rotation), dim=-1)
+
+
+def euler2mat(angle: torch.Tensor):
+    """Convert euler angles to rotation matrix.
+    Reference: https://github.com/pulkitag/pycaffe-utils/blob/master/rot_utils.py#L174
+    Args:
+        angle: rotation angle along 3 axis (in radians) [Bx3]
+    Returns:
+        Rotation matrix corresponding to the euler angles [Bx3x3]
+    """
+    shape = angle.shape
+    angle = angle.view(-1, 3)
+    x, y, z = angle[:, 0], angle[:, 1], angle[:, 2]
+
+    cosz = torch.cos(z)
+    sinz = torch.sin(z)
+
+    zeros = torch.zeros_like(z)
+    ones = torch.ones_like(z)
+    zmat = torch.stack([cosz, -sinz, zeros, sinz, cosz, zeros, zeros, zeros, ones], dim=1).view(-1, 3, 3)
+
+    cosy = torch.cos(y)
+    siny = torch.sin(y)
+
+    ymat = torch.stack([cosy, zeros, siny, zeros, ones, zeros, -siny, zeros, cosy], dim=1).view(-1, 3, 3)
+
+    cosx = torch.cos(x)
+    sinx = torch.sin(x)
+
+    xmat = torch.stack([ones, zeros, zeros, zeros, cosx, -sinx, zeros, sinx, cosx], dim=1).view(-1, 3, 3)
+
+    rot_mat = xmat.bmm(ymat).bmm(zmat)
+    rot_mat = rot_mat.view(*shape[:-1], 3, 3)
+    return rot_mat
+
+
+def pose_vec2mat(vec: torch.Tensor):
+    """
+    Convert 6DoF parameters to transformation matrix.
+    Args:
+        vec: 6DoF parameters in the order of tx, ty, tz, rx, ry, rz [B,6]
+    Returns:
+        A transformation matrix [B,4,4]
+    """
+    translation = vec[..., :3].unsqueeze(-1)  # [...x3x1]
+    rot = vec[..., 3:]  # [...x3]
+    rot_mat = euler2mat(rot)  # [...,3,3]
+    transform_mat = torch.cat([rot_mat, translation], dim=-1)  # [...,3,4]
+    transform_mat = torch.nn.functional.pad(transform_mat, [0, 0, 0, 1], value=0)  # [...,4,4]
+    transform_mat[..., 3, 3] = 1.0
+    return transform_mat
 
 
 def compute_miou(pred, gt, n_classes=2):
