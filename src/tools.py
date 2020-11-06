@@ -253,6 +253,8 @@ def get_val_info(model, valloader, loss_fn, device, use_tqdm=True, is_temporal=F
     total_intersect = 0.0
     total_union = 0
     total_iou = 0
+    total_positional_error = 0
+    total_angular_error = 0
     print('running eval...')
     loader = tqdm(valloader) if use_tqdm else valloader
     with torch.no_grad():
@@ -301,7 +303,8 @@ def get_val_info(model, valloader, loss_fn, device, use_tqdm=True, is_temporal=F
 
                 if model.predict_future_egomotion:
                     future_egomotions = future_egomotions.to(device)
-                    future_egomotions = mat2pose_vec(future_egomotions)[:, (model.receptive_field - 1):].contiguous()
+                    future_egomotions = future_egomotions[:, (model.receptive_field - 1):].contiguous()
+                    future_egomotions_vec = mat2pose_vec(future_egomotions)
 
             # loss
             loss = torch.zeros(1, dtype=torch.float32).to(device)
@@ -309,7 +312,7 @@ def get_val_info(model, valloader, loss_fn, device, use_tqdm=True, is_temporal=F
                 loss += loss_fn(preds, binimgs)
 
             if model.predict_future_egomotion:
-                loss += egomotion_loss_fn(out['future_egomotions'], future_egomotions)
+                loss += egomotion_loss_fn(out['future_egomotions'], future_egomotions_vec)
 
             total_loss += loss.item()
 
@@ -322,6 +325,16 @@ def get_val_info(model, valloader, loss_fn, device, use_tqdm=True, is_temporal=F
                                     n_classes=n_classes)
                 total_iou += miou['vehicles']
 
+            if model.predict_future_egomotion:
+                # Convert predicted 6 DoF egomotion to pose matrix
+                predicted_pose_matrices = pose_vec2mat(out['future_egomotions'])
+
+                positional_error, angular_error = compute_egomotion_error(
+                    predicted_pose_matrices.detach().cpu().numpy(), future_egomotions.cpu().numpy()
+                )
+                total_positional_error += positional_error
+                total_angular_error += angular_error
+
     model.train()
     t1 = time()
     print(f'Evaluation on the validation set took: {(t1 - t0) / 60}mins')
@@ -330,6 +343,8 @@ def get_val_info(model, valloader, loss_fn, device, use_tqdm=True, is_temporal=F
             'loss': total_loss / len(valloader),
             #'iou': total_intersect / total_union,
             'iou': total_iou / len(valloader),
+            'positional_error': total_positional_error / len(valloader),
+            'angular_error': total_angular_error / len(valloader),
             }
 
 
@@ -560,6 +575,34 @@ def compute_miou(pred, gt, n_classes=2):
 
     miou_dict['miou'] = miou
     return miou_dict
+
+
+def compute_egomotion_error(pred, gt):
+    """
+    Parameters
+    ----------
+        pred: np.ndarray (B, S, 4, 4)
+        gt: np.ndarray (B, S, 4, 4)
+    """
+    # Positional error
+    pred_translation = pred[..., :3, 3]
+    gt_translation = gt[..., :3, 3]
+    positional_error = np.linalg.norm(pred_translation - gt_translation, ord=2, axis=-1)
+
+    # Angular error
+    b, s = pred.shape[:2]
+    pred_rotation = pred[..., :3, :3].reshape(b*s, 3, 3)
+    gt_rotation = gt[..., :3, :3].reshape(b*s, 3, 3)
+
+    # Create 3D unit vectors from the rotation matrices
+    pred_rotation_vector = np.dot(pred_rotation, np.ones(3)) / np.sqrt(3)
+    gt_rotation_vector = np.dot(gt_rotation, np.ones(3)) / np.sqrt(3)
+
+    # Dot product between the 3D vectors
+    dot_product = np.sum(pred_rotation_vector * gt_rotation_vector, axis=-1)
+    angular_error = np.arccos(dot_product) * 180 / np.pi
+
+    return positional_error.mean(), angular_error.mean()
 
 
 def save_static_labels(dataroot='/data/cvfs/ah2029/datasets/nuscenes', version='mini'):

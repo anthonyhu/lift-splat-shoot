@@ -14,29 +14,30 @@ import os
 
 from .models import compile_model
 from .data import compile_data
-from .tools import get_batch_iou, compute_miou, get_val_info, mat2pose_vec
+from .tools import get_batch_iou, compute_miou, get_val_info, mat2pose_vec, pose_vec2mat, compute_egomotion_error
 from .utils import print_model_spec, set_module_grad
 
-BATCH_SIZE = 3
-TAG = 'identity_temporal_model'
-OUTPUT_PATH = './runs/future_egomotion'
+BATCH_SIZE = 1
+TAG = 'debug'
+OUTPUT_PATH = './runs/debug'
 
 
 PREDICT_FUTURE_EGOMOTION = True
-TEMPORAL_MODEL_NAME = 'identity'
+TEMPORAL_MODEL_NAME = 'gru'
+
 DISABLE_BEV_PREDICTION = False
 
 MODEL_NAME = 'temporal'
-receptive_field = 3
-n_future = 3
+RECEPTIVE_FIELD = 3
+N_FUTURE = 3
 
 if 'direwolf' in socket.gethostname():
-    receptive_field = 2
-    n_future = 2
+    RECEPTIVE_FIELD = 2
+    N_FUTURE = 2
 
 
-MODEL_CONFIG = {'receptive_field': receptive_field,
-                'n_future': n_future,
+MODEL_CONFIG = {'receptive_field': RECEPTIVE_FIELD,
+                'n_future': N_FUTURE,
                 'latent_dim': 1,
                 'predict_future_egomotion': PREDICT_FUTURE_EGOMOTION,
                 'temporal_model_name': TEMPORAL_MODEL_NAME,
@@ -54,37 +55,37 @@ RAND_FLIP = False  # True for basic
 NCAMS = 6  # 5 for basic
 DATAROOT = '/data/cvfs/ah2029/datasets/nuscenes'
 PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
-WEIGHT = [1.0, 2.13]
+CROSS_ENTROPY_WEIGHTS = [1.0, 2.13]
 if MAP_LABELS:
     N_CLASSES = 4
-    WEIGHT = [1.0, 3.0, 1.0, 2.0]
+    CROSS_ENTROPY_WEIGHTS = [1.0, 3.0, 1.0, 2.0]
 
 
 def train(version,
-            dataroot=DATAROOT,
-            nepochs=10000,
+          dataroot=DATAROOT,
+          nepochs=10000,
 
-            H=900, W=1600,
-            resize_lim=(0.193, 0.225),
-            final_dim=(128, 352),
-            bot_pct_lim=(0.0, 0.22),
-            rot_lim=(-5.4, 5.4),
-            rand_flip=RAND_FLIP,
-            ncams=NCAMS,
-            max_grad_norm=5.0,
-            weight=WEIGHT,
-            tag=TAG,
-            output_path=OUTPUT_PATH,
-            xbound=[-50.0, 50.0, 0.5],
-            ybound=[-50.0, 50.0, 0.5],
-            zbound=[-10.0, 10.0, 20.0],
-            dbound=[4.0, 45.0, 1.0],
+          H=900, W=1600,
+          resize_lim=(0.193, 0.225),
+          final_dim=(128, 352),
+          bot_pct_lim=(0.0, 0.22),
+          rot_lim=(-5.4, 5.4),
+          rand_flip=RAND_FLIP,
+          ncams=NCAMS,
+          max_grad_norm=5.0,
+          weight=CROSS_ENTROPY_WEIGHTS,
+          tag=TAG,
+          output_path=OUTPUT_PATH,
+          xbound=[-50.0, 50.0, 0.5],
+          ybound=[-50.0, 50.0, 0.5],
+          zbound=[-10.0, 10.0, 20.0],
+          dbound=[4.0, 45.0, 1.0],
 
-            bsz=BATCH_SIZE,
-            nworkers=5,
-            lr=LEARNING_RATE,
-            weight_decay=1e-7,
-            ):
+          bsz=BATCH_SIZE,
+          nworkers=5,
+          lr=LEARNING_RATE,
+          weight_decay=1e-7,
+          ):
     logdir = create_session_name(output_path, tag)
 
     print('Model config:')
@@ -160,9 +161,12 @@ def train(version,
 
     if PREDICT_FUTURE_EGOMOTION:
         egomotion_loss_fn = torch.nn.MSELoss()
+    else:
+        egomotion_loss_fn = None
 
     writer = SummaryWriter(logdir=logdir)
     val_step = 20 if version == 'mini' else 10000
+    train_eval_step = 20 if version == 'mini' else 100
 
     model.train()
     counter = 0
@@ -196,14 +200,16 @@ def train(version,
 
                 if PREDICT_FUTURE_EGOMOTION:
                     future_egomotions = future_egomotions.to(device)
-                    future_egomotions = mat2pose_vec(future_egomotions)[:, (model.receptive_field - 1):].contiguous()
+                    future_egomotions = future_egomotions[:, (model.receptive_field - 1):].contiguous()
+
+                    future_egomotions_vec = mat2pose_vec(future_egomotions)
 
             loss = torch.zeros(1, dtype=torch.float32).to(device)
             if not DISABLE_BEV_PREDICTION:
                 loss += loss_fn(preds, binimgs)
 
             if PREDICT_FUTURE_EGOMOTION:
-                loss += egomotion_loss_fn(out['future_egomotions'], future_egomotions)
+                loss += egomotion_loss_fn(out['future_egomotions'], future_egomotions_vec)
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
@@ -215,16 +221,28 @@ def train(version,
                 print(f'Iteration {counter}, loss={loss.item()}, step time ={t1 - t0}')
                 writer.add_scalar('train/loss', loss, counter)
 
-            if counter % 20 == 0:
+            if counter % train_eval_step == 0:
+                writer.add_scalar('train/epoch', epoch, counter)
+                writer.add_scalar('train/step_time', t1 - t0, counter)
                 #_, _, iou = get_batch_iou(preds, binimgs.unsqueeze(1))
                 if not DISABLE_BEV_PREDICTION:
                     miou = compute_miou((torch.argmax(preds, dim=1)).float().detach().cpu().numpy(), binimgs.cpu().numpy(),
                                         n_classes=N_CLASSES)
                     iou = miou['vehicles']
                     writer.add_scalar('train/iou', iou, counter)
-                    writer.add_scalar('train/epoch', epoch, counter)
-                    writer.add_scalar('train/step_time', t1 - t0, counter)
                     print(f'train iou: {iou}')
+
+                if PREDICT_FUTURE_EGOMOTION:
+                    # Convert predicted 6 DoF egomotion to pose matrix
+                    predicted_pose_matrices = pose_vec2mat(out['future_egomotions'])
+
+                    positional_error, angular_error = compute_egomotion_error(
+                        predicted_pose_matrices.detach().cpu().numpy(), future_egomotions.cpu().numpy()
+                    )
+                    writer.add_scalar('train/positional_error', positional_error, counter)
+                    writer.add_scalar('train/angular_error', angular_error, counter)
+                    print(f'train positional_error (in m): {positional_error}')
+                    print(f'train angular_error (in degrees): {angular_error}')
 
             if counter % val_step == 0:
                 val_info = get_val_info(model, valloader, loss_fn, device, is_temporal=(MODEL_NAME == 'temporal'),
@@ -232,6 +250,8 @@ def train(version,
                 print('VAL', val_info)
                 writer.add_scalar('val/loss', val_info['loss'], counter)
                 writer.add_scalar('val/iou', val_info['iou'], counter)
+                writer.add_scalar('val/positional_error', val_info['positional_error'], counter)
+                writer.add_scalar('val/angular_error', val_info['angular_error'], counter)
 
             if counter % val_step == 0:
                 model.eval()

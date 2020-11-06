@@ -17,7 +17,8 @@ from .tools import (ego_to_cam, get_only_in_img_mask, denormalize_img,
                     get_nusc_maps, plot_nusc_map)
 from .models import compile_model
 
-from .train import N_CLASSES, DATAROOT, PRETRAINED_MODEL_WEIGHTS, MODEL_NAME, SEQUENCE_LENGTH
+from .train import N_CLASSES, DATAROOT, PRETRAINED_MODEL_WEIGHTS, MODEL_NAME, SEQUENCE_LENGTH, MAP_LABELS, \
+    PREDICT_FUTURE_EGOMOTION, DISABLE_BEV_PREDICTION, RECEPTIVE_FIELD, N_FUTURE, MODEL_CONFIG, CROSS_ENTROPY_WEIGHTS
 
 
 def lidar_check(version,
@@ -123,24 +124,24 @@ def lidar_check(version,
 
 
 def eval_model_iou(version,
-                modelf=PRETRAINED_MODEL_WEIGHTS,
-                dataroot=DATAROOT,
+                   model_weights=PRETRAINED_MODEL_WEIGHTS,
+                   dataroot=DATAROOT,
 
-                H=900, W=1600,
-                resize_lim=(0.193, 0.225),
-                final_dim=(128, 352),
-                bot_pct_lim=(0.0, 0.22),
-                rot_lim=(-5.4, 5.4),
-                rand_flip=True,
+                   H=900, W=1600,
+                   resize_lim=(0.193, 0.225),
+                   final_dim=(128, 352),
+                   bot_pct_lim=(0.0, 0.22),
+                   rot_lim=(-5.4, 5.4),
+                   rand_flip=True,
 
-                xbound=[-50.0, 50.0, 0.5],
-                ybound=[-50.0, 50.0, 0.5],
-                zbound=[-10.0, 10.0, 20.0],
-                dbound=[4.0, 45.0, 1.0],
+                   xbound=[-50.0, 50.0, 0.5],
+                   ybound=[-50.0, 50.0, 0.5],
+                   zbound=[-10.0, 10.0, 20.0],
+                   dbound=[4.0, 45.0, 1.0],
 
-                bsz=4,
-                nworkers=6,
-                ):
+                   bsz=1,
+                   nworkers=5,
+                   ):
 
     if 'vm' in socket.gethostname():
         dataroot = '/mnt/local/datasets/nuscenes'
@@ -168,21 +169,26 @@ def eval_model_iou(version,
         parser_name = 'segmentationdata'
     trainloader, valloader = compile_data(version, dataroot, data_aug_conf=data_aug_conf,
                                           grid_conf=grid_conf, bsz=bsz, nworkers=nworkers,
-                                          parser_name=parser_name,
-                                          sequence_length=SEQUENCE_LENGTH)
+                                          parser_name=parser_name, sequence_length=SEQUENCE_LENGTH,
+                                          map_labels=MAP_LABELS)
 
     device = torch.device('cuda:0')
 
-    model = compile_model(grid_conf, data_aug_conf, outC=N_CLASSES)
-    print('loading', modelf)
-    model.load_state_dict(torch.load(modelf))
+    model = compile_model(grid_conf, data_aug_conf, outC=N_CLASSES, name=MODEL_NAME, model_config=MODEL_CONFIG)
+    print('Loading weights from:', model_weights)
+    model.load_state_dict(torch.load(model_weights))
     model.to(device)
 
-    loss_fn = torch.nn.CrossEntropyLoss().cuda()
+    loss_fn = torch.nn.CrossEntropyLoss(weight=torch.Tensor(CROSS_ENTROPY_WEIGHTS)).to(device)
+
+    if PREDICT_FUTURE_EGOMOTION:
+        egomotion_loss_fn = torch.nn.MSELoss()
+    else:
+        egomotion_loss_fn = None
 
     model.eval()
-    val_info = get_val_info(model, valloader, loss_fn, device, is_temporal=False, repeat_baseline=False,
-                            receptive_field=0, n_classes=N_CLASSES)
+    val_info = get_val_info(model, valloader, loss_fn, device, is_temporal=(MODEL_NAME == 'temporal'),
+                            n_classes=N_CLASSES, egomotion_loss_fn=egomotion_loss_fn)
     print(val_info)
 
 

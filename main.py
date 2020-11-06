@@ -13,7 +13,7 @@ if __name__ == '__main__':
     Fire({
         'lidar_check': src.explore.lidar_check,
         'train': src.train.train,
-        'eval_model_iou': src.explore.eval_model_iou,
+        'eval': src.explore.eval_model_iou,
         'viz_model_preds': src.explore.viz_model_preds,
         'save_static_labels': src.tools.save_static_labels,
     })
