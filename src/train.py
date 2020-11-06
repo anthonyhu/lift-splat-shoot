@@ -165,8 +165,8 @@ def train(version,
         egomotion_loss_fn = None
 
     writer = SummaryWriter(logdir=logdir)
-    val_step = 20 if version == 'mini' else 10000
-    train_eval_step = 20 if version == 'mini' else 100
+    val_step = 10 if version == 'mini' else 10000
+    train_eval_step = 10 if version == 'mini' else 100
 
     model.train()
     counter = 0
@@ -226,11 +226,13 @@ def train(version,
                 writer.add_scalar('train/step_time', t1 - t0, counter)
                 #_, _, iou = get_batch_iou(preds, binimgs.unsqueeze(1))
                 if not DISABLE_BEV_PREDICTION:
-                    miou = compute_miou((torch.argmax(preds, dim=1)).float().detach().cpu().numpy(), binimgs.cpu().numpy(),
-                                        n_classes=N_CLASSES)
-                    iou = miou['vehicles']
-                    writer.add_scalar('train/iou', iou, counter)
-                    print(f'train iou: {iou}')
+                    vehicles_iou = compute_miou(
+                        torch.argmax(preds, dim=1).float().detach().cpu().numpy(),
+                        binimgs.cpu().numpy(),
+                        n_classes=N_CLASSES,
+                    )
+                    writer.add_scalar('train/vehicles_iou', vehicles_iou['vehicles'], counter)
+                    print(f'train vehicle iou: {vehicles_iou}')
 
                 if PREDICT_FUTURE_EGOMOTION:
                     # Convert predicted 6 DoF egomotion to pose matrix
@@ -249,7 +251,7 @@ def train(version,
                                         n_classes=N_CLASSES, egomotion_loss_fn=egomotion_loss_fn)
                 print('VAL', val_info)
                 writer.add_scalar('val/loss', val_info['loss'], counter)
-                writer.add_scalar('val/iou', val_info['iou'], counter)
+                writer.add_scalar('val/vehicles_iou', val_info['vehicles_iou'], counter)
                 writer.add_scalar('val/positional_error', val_info['positional_error'], counter)
                 writer.add_scalar('val/angular_error', val_info['angular_error'], counter)
 

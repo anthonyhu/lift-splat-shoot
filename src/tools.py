@@ -252,7 +252,7 @@ def get_val_info(model, valloader, loss_fn, device, use_tqdm=True, is_temporal=F
     total_loss = 0.0
     total_intersect = 0.0
     total_union = 0
-    total_iou = 0
+    total_vehicles_iou = 0
     total_positional_error = 0
     total_angular_error = 0
     print('running eval...')
@@ -321,9 +321,12 @@ def get_val_info(model, valloader, loss_fn, device, use_tqdm=True, is_temporal=F
             # total_intersect += intersect
             # total_union += union
             if not model.disable_bev_prediction:
-                miou = compute_miou((torch.argmax(preds, dim=1)).float().detach().cpu().numpy(), binimgs.cpu().numpy(),
-                                    n_classes=n_classes)
-                total_iou += miou['vehicles']
+                vehicles_iou = compute_miou(
+                    torch.argmax(preds, dim=1).float().detach().cpu().numpy(),
+                    binimgs.cpu().numpy(),
+                    n_classes=n_classes,
+                )
+                total_vehicles_iou += vehicles_iou['vehicles']
 
             if model.predict_future_egomotion:
                 # Convert predicted 6 DoF egomotion to pose matrix
@@ -341,8 +344,7 @@ def get_val_info(model, valloader, loss_fn, device, use_tqdm=True, is_temporal=F
 
     return {
             'loss': total_loss / len(valloader),
-            #'iou': total_intersect / total_union,
-            'iou': total_iou / len(valloader),
+            'vehicles_iou': total_vehicles_iou / len(valloader),
             'positional_error': total_positional_error / len(valloader),
             'angular_error': total_angular_error / len(valloader),
             }
@@ -550,8 +552,6 @@ def compute_miou(pred, gt, n_classes=2):
 
     legend = {0: 'background',
               VEHICLES_ID: 'vehicles',
-              DRIVEABLE_AREA_ID: 'driveable_area',
-              LINE_MARKINGS_ID: 'line_markings',
               }
 
     # Calculate mean IOU
@@ -575,6 +575,12 @@ def compute_miou(pred, gt, n_classes=2):
 
     miou_dict['miou'] = miou
     return miou_dict
+
+
+def compute_pixel_accuracy(pred, gt):
+    n_pixels = gt.size
+
+    return (gt == pred).sum() / n_pixels
 
 
 def compute_egomotion_error(pred, gt):
@@ -680,7 +686,7 @@ def save_static_labels(dataroot='/data/cvfs/ah2029/datasets/nuscenes', version='
 
 
 def save_static_label_iter(i, dataset, dataroot, mode):
-    imgs, rots, trans, intrins, post_rots, post_trans, binimg = dataset[i]
+    imgs, rots, trans, intrins, post_rots, post_trans, binimg, future_egomotion = dataset[i]
 
     output_path = os.path.join(dataroot, 'bev_label', mode)
     os.makedirs(output_path, exist_ok=True)
