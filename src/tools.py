@@ -663,17 +663,17 @@ def save_static_labels(dataroot='/data/cvfs/ah2029/datasets/nuscenes', version='
             mode = 'train'
         else:
             mode = 'val'
-        # for _ in tqdm(
-        #         pool.imap_unordered(
-        #             partial(save_static_label_iter, dataset=dataset, dataroot=dataroot, mode=mode),
-        #             range(len(dataset)),
-        #         ),
-        #         total=len(dataset)
-        # ):
-        #     pass
+        for _ in tqdm(
+                pool.imap_unordered(
+                    partial(save_static_label_iter, dataset=dataset, dataroot=dataroot, mode=mode),
+                    range(len(dataset)),
+                ),
+                total=len(dataset)
+        ):
+            pass
 
-        for i in tqdm(range(len(dataset))):
-            partial(save_static_label_iter, dataset=dataset, dataroot=dataroot, mode=mode)(i)
+        # for i in tqdm(range(len(dataset))):
+        #     partial(save_static_label_iter, dataset=dataset, dataroot=dataroot, mode=mode)(i)
 
     t1 = time()
     print(f'Saving the labels took: {(t1 - t0) / 60}mins')
