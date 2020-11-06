@@ -602,6 +602,9 @@ def compute_egomotion_error(pred, gt):
     # Dot product between the 3D vectors
     dot_product = np.sum(pred_rotation_vector * gt_rotation_vector, axis=-1)
     angular_error = np.arccos(dot_product) * 180 / np.pi
+
+    if np.any(np.isnan(angular_error)):
+        print('nan values in angular error')
     angular_error = angular_error[~np.isnan(angular_error)].mean()
 
     return positional_error, angular_error
