@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import cv2
+from PIL import Image
 
 def print_model_spec(model, name=''):
     n_parameters = count_n_parameters(model)
@@ -42,6 +43,19 @@ def plot_instance_map(instance_image, instance_map, instance_colours={}):
     plot_image = np.zeros((instance_image.shape[0], instance_image.shape[1], 3))
     for key, value in instance_colours.items():
         plot_image[instance_image==key] = value
-    
+
     return plot_image
+
+def np_uint8_to_pil(np_img: np.ndarray) -> Image.Image:
+    if np_img.dtype != np.uint8:
+        raise TypeError(f"Expected np.ndarray of dtype np.uint8, but got dtype {np_img.dtype}")
+    if np_img.ndim == 3 and np_img.shape[-1] == 1:
+        np_img = np.squeeze(np_img)
+    elif np_img.ndim != 2:
+        raise ValueError(f"Unsupported shape {np_img.shape}")
+
+    pil_img = Image.fromarray(np_img, mode='L')
+    return pil_img
+    
+    
     

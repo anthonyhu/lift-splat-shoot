@@ -12,7 +12,7 @@ import numpy as np
 from PIL import Image
 import cv2
 import matplotlib.pyplot as plt
-
+import json
 from pyquaternion import Quaternion
 from nuscenes.nuscenes import NuScenes
 from nuscenes.utils.splits import create_splits_scenes
@@ -21,7 +21,7 @@ from glob import glob
 
 from .tools import get_lidar_data, img_transform, normalize_img, gen_dx_bx, get_nusc_maps, get_local_map, \
     convert_egopose_to_matrix
-from .utils import convert_figure_numpy
+from .utils import convert_figure_numpy, np_uint8_to_pil
 from .constants import VEHICLES_ID, DRIVEABLE_AREA_ID, LINE_MARKINGS_ID
 
 
@@ -302,27 +302,53 @@ class NuscData(torch.utils.data.Dataset):
         label = torch.Tensor(label).long()
         return label
 
-    def get_label(self, rec, index, instance_map={}):
+    def write_data_to_cache(self, index, bin_image_np, instance_image_np, instance_map):
+        bin_image_pil = np_uint8_to_pil(bin_image_np.astype(np.uint8))
+        instance_image_pil = np_uint8_to_pil(instance_image_np.astype(np.uint8))
+        with open(os.path.join(self.dataroot, self.mode, f'bev_instance_map_{index:08d}.json'), 'w') as f:
+            f.write(json.dumps(instance_map))
+        
+        bin_image_pil.save(os.path.join(self.dataroot, 'bev_label', self.mode, f'bev_seg_label_{index:08d}.png'))
+        instance_image_pil.save(os.path.join(self.dataroot, 'bev_label', self.mode, f'bev_instance_label_{index:08d}.png'))
+
+    def read_data_from_cache(self, seg_path, instance_path, map_path):
+        seg_image_pil = Image.open(seg_path)
+        seg_image_np = np.asarray(seg_image_pil, dtype=np.uint8)
+
+        instance_image_pil = Image.open(image_path)
+        instace_image_pil = np.asarray(instance_image_pil, dtype=np.uint8)
+
+        map_path = json.loads(open(map_path, 'r'))
+
+    def get_label(self, rec, index, instance_map={}):        
+        seg_path = os.path.join(self.dataroot, 'bev_label', self.mode, f'bev_seg_label_{index:08d}.png')
+        instance_path = os.path.join(self.dataroot, 'bev_label', self.mode, f'bev_instance_label_{index:08d}.png')
+        map_path = os.path.join(self.dataroot, 'bev_label', self.mode, f'bev_instance_map_{index:08d}.json')
+        
+        if os.path.isfile(seg_path) and os.path.isfile(instance_path) and os.path.isfile(map_path):
+            print(f'reading data from cache for index - {index}')
+            bin_image_np, instance_image_np, instance_map = self.read_data_from_cache(seg_path, instance_path, map_path)
+            bin_image = torch.from_numpy(bin_image_np)
+            instance_image = torch.from_numpy(instance_image_np)
+            return bin_image, instance_image, instance_map
+
         bin_image_np, instance_image_np, instance_map = self.get_occupancy_map_and_instance_labels(rec, instance_map)
         bin_image = torch.from_numpy(bin_image_np)
         instance_image = torch.from_numpy(instance_image_np)
+        print(f'writing data to cache for index - {index}')
+        self.write_data_to_cache(index, bin_image_np, instance_image_np, instance_map)
+        
         return bin_image, instance_image, instance_map
-        # Load saved labels
-        # label_path = os.path.join(self.dataroot, 'bev_label', self.mode, f'bev_label_{index:08d}.png')
+        
+        
 
-        # if os.path.isfile(label_path):
-        #     label = np.asarray(Image.open(label_path)).astype(np.int64)
-        #     label = torch.Tensor(label).long()
-        #     return label
-
-        # binimg = self.get_binimg(rec)
         # if self.map_labels:
         #     static_label = self.get_static_label(rec, index)
         #     # Add car labels
         #     static_label[binimg == 1] = VEHICLES_ID
         #     label = static_label
 
-        # return label
+        return label
 
     def get_future_egomotion(self, rec, index):
         rec_t0 = rec
