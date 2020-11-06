@@ -139,7 +139,7 @@ def eval_model_iou(version,
                    zbound=[-10.0, 10.0, 20.0],
                    dbound=[4.0, 45.0, 1.0],
 
-                   bsz=1,
+                   batch_size=1,
                    nworkers=5,
                    ):
 
@@ -168,7 +168,7 @@ def eval_model_iou(version,
     else:
         parser_name = 'segmentationdata'
     trainloader, valloader = compile_data(version, dataroot, data_aug_conf=data_aug_conf,
-                                          grid_conf=grid_conf, bsz=bsz, nworkers=nworkers,
+                                          grid_conf=grid_conf, bsz=batch_size, nworkers=nworkers,
                                           parser_name=parser_name, sequence_length=SEQUENCE_LENGTH,
                                           map_labels=MAP_LABELS)
 
