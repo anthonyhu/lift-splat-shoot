@@ -669,27 +669,27 @@ def save_static_labels(dataroot='/data/cvfs/ah2029/datasets/nuscenes', version='
             mode = 'train'
         else:
             mode = 'val'
-        # for _ in tqdm(
-        #         pool.imap_unordered(
-        #             partial(save_static_label_iter, dataset=dataset, dataroot=dataroot, mode=mode),
-        #             range(len(dataset)),
-        #         ),
-        #         total=len(dataset)
-        # ):
-        #     pass
+        for _ in tqdm(
+                pool.imap_unordered(
+                    partial(save_static_label_iter, dataset=dataset, dataroot=dataroot, mode=mode),
+                    range(len(dataset)),
+                ),
+                total=len(dataset)
+        ):
+            pass
 
-        for i in tqdm(range(len(dataset))):
-            partial(save_static_label_iter, dataset=dataset, dataroot=dataroot, mode=mode)(i)
+        # for i in tqdm(range(len(dataset))):
+        #     partial(save_static_label_iter, dataset=dataset, dataroot=dataroot, mode=mode)(i)
 
     t1 = time()
     print(f'Saving the labels took: {(t1 - t0) / 60}mins')
 
 
 def save_static_label_iter(i, dataset, dataroot, mode):
-    imgs, rots, trans, intrins, post_rots, post_trans, binimg, future_egomotion = dataset[i]
+    imgs, rots, trans, intrins, post_rots, post_trans, binimg, static_label, future_egomotion = dataset[i]
 
     output_path = os.path.join(dataroot, 'bev_label', mode)
     os.makedirs(output_path, exist_ok=True)
     label_path = os.path.join(output_path, f'bev_label_{i:08d}.png')
-    binimg = Image.fromarray(binimg.numpy().astype(np.int32), mode='I')
-    binimg.save(label_path)
+    static_label = Image.fromarray(static_label.numpy().astype(np.int32), mode='I')
+    static_label.save(label_path)

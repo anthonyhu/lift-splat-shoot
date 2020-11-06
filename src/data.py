@@ -24,9 +24,9 @@ from .tools import get_lidar_data, img_transform, normalize_img, gen_dx_bx, get_
 from .utils import convert_figure_numpy
 from .constants import VEHICLES_ID, DRIVEABLE_AREA_ID, LINE_MARKINGS_ID
 
-
+# changed this from false to true
 class NuscData(torch.utils.data.Dataset):
-    def __init__(self, nusc, is_train, data_aug_conf, grid_conf, sequence_length=0, map_labels=False,
+    def __init__(self, nusc, is_train, data_aug_conf, grid_conf, sequence_length=0, map_labels=True,
                  dataroot=''):
         self.nusc = nusc
         self.is_train = is_train
@@ -216,7 +216,7 @@ class NuscData(torch.utils.data.Dataset):
         return torch.Tensor(img).long()
 
     def get_static_label(self, rec, index):
-        print(f'Generating static scene for dataset {self.mode} and index={index}')
+        # print(f'Generating static scene for dataset {self.mode} and index={index}')
         dpi = 100
         height, width = (200, 200)
         driveable_area_color = (1.00, 0.50, 0.31)
@@ -237,6 +237,7 @@ class NuscData(torch.utils.data.Dataset):
         lmap = get_local_map(self.nusc_maps[map_name], center,
                              50.0, poly_names, line_names)
 
+
         label = np.zeros((height, width), dtype=np.int64)
 
         # Driveable area
@@ -247,7 +248,7 @@ class NuscData(torch.utils.data.Dataset):
         for name in poly_names:
             for la in lmap[name]:
                 pts = (la - bx) / dx
-                ax.fill(pts[:, 1], pts[:, 0], c=driveable_area_color)
+                ax.fill(width - pts[:, 1], height - pts[:, 0], c=driveable_area_color, linewidth=.01)
 
         ax.set_xlim((width, 0))
         ax.set_ylim((0, height))
@@ -270,7 +271,7 @@ class NuscData(torch.utils.data.Dataset):
         for name in line_names:
             for la in lmap[name]:
                 pts = (la - bx) / dx
-                ax.plot(pts[:, 1], pts[:, 0], c=line_markings_color)
+                ax.plot(width - pts[:, 1], height - pts[:, 0], c=line_markings_color, linewidth=.01)
 
         ax.set_xlim((width, 0))
         ax.set_ylim((0, height))
@@ -288,8 +289,10 @@ class NuscData(torch.utils.data.Dataset):
         label = torch.Tensor(label).long()
         return label
 
-    def get_label(self, rec, index):
+    def get_dynamic_label(self, rec, index):
         return self.get_binimg(rec)
+
+    def get_static_label(self, rec, index):
         # Load saved labels
         label_path = os.path.join(self.dataroot, 'bev_label', self.mode, f'bev_label_{index:08d}.png')
 
@@ -298,12 +301,8 @@ class NuscData(torch.utils.data.Dataset):
             label = torch.Tensor(label).long()
             return label
 
-        print(f'Generating labels for index {index}')
-        binimg = self.get_binimg(rec)
         if self.map_labels:
             static_label = self.get_static_label(rec, index)
-            # Add car labels
-            static_label[binimg == 1] = VEHICLES_ID
             label = static_label
 
         return label
@@ -372,16 +371,17 @@ class SegmentationData(NuscData):
 
         cams = self.choose_cams()
         imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
-        binimg = self.get_label(rec, index)
+        binimg = self.get_dynamic_label(rec, index)
+        static_label = self.get_static_label(rec, index)
         future_egomotion = self.get_future_egomotion(rec, index)
         
-        return imgs, rots, trans, intrins, post_rots, post_trans, binimg, future_egomotion
+        return imgs, rots, trans, intrins, post_rots, post_trans, binimg, static_label, future_egomotion
 
 
 class SequentialSegmentationData(SegmentationData):
     def __getitem__(self, index):
         list_imgs, list_rots, list_trans, list_intrins = [], [], [], []
-        list_post_rots, list_post_trans, list_binimg, list_future_egomotion = [], [], [], []
+        list_post_rots, list_post_trans, list_binimg, list_static_label, list_future_egomotion = [], [], [], [], []
         cams = self.choose_cams()
 
         previous_rec = None
@@ -401,7 +401,8 @@ class SequentialSegmentationData(SegmentationData):
                     index_t = previous_index_t
 
             imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
-            binimg = self.get_label(rec, index_t)
+            binimg = self.get_dynamic_label(rec, index_t)
+            static_label = self.get_static_label(rec, index)
             future_egomotion = self.get_future_egomotion(rec, index_t)
 
             list_imgs.append(imgs)
@@ -411,6 +412,7 @@ class SequentialSegmentationData(SegmentationData):
             list_post_rots.append(post_rots)
             list_post_trans.append(post_trans)
             list_binimg.append(binimg)
+            list_static_label.append(static_label)
             list_future_egomotion.append(future_egomotion)
 
             previous_rec = rec
@@ -424,7 +426,7 @@ class SequentialSegmentationData(SegmentationData):
         list_future_egomotion = torch.stack(list_future_egomotion)
 
         return (list_imgs, list_rots, list_trans, list_intrins, list_post_rots, list_post_trans, list_binimg,
-                list_future_egomotion)
+                list_static_label, list_future_egomotion)
 
 
 
