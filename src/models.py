@@ -114,20 +114,20 @@ class BevEncode(nn.Module):
             nn.ReLU(inplace=True),
             nn.Conv2d(128, outC, kernel_size=1, padding=0),
         )
-        # self.instance_regression_head = nn.Sequential(
-        #     self._upsample_layer(mode='transpose_conv'),
-        #     nn.Conv2d(256, 128, kernel_size=3, padding=1, bias=False),
-        #     nn.BatchNorm2d(128),
-        #     nn.ReLU(inplace=True),
-        #     nn.Conv2d(128, 2, kernel_size=1, padding=0),
-        # )
-        # self.instance_center_head = nn.Sequential(
-        #     self._upsample_layer(mode='transpose_conv'),
-        #     nn.Conv2d(256, 128, kernel_size=3, padding=1, bias=False),
-        #     nn.BatchNorm2d(128),
-        #     nn.ReLU(inplace=True),
-        #     nn.Conv2d(128, 1, kernel_size=1, padding=0),
-        # )
+        self.instance_regression_head = nn.Sequential(
+            self._upsample_layer(mode='transpose_conv'),
+            nn.Conv2d(256, 128, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(128, 2, kernel_size=1, padding=0),
+        )
+        self.instance_center_head = nn.Sequential(
+            self._upsample_layer(mode='transpose_conv'),
+            nn.Conv2d(256, 128, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(128, 1, kernel_size=1, padding=0),
+        )
 
     def _upsample_layer(self, mode='bilinear', channels=256, kernel_size = 3):
         if mode == 'bilinear':
@@ -151,9 +151,10 @@ class BevEncode(nn.Module):
         x = self.layer3(x)
 
         x = self.up1(x, x1)
-        x = self.up2(x)
-
-        return x
+        seg_out = self.up2(x)
+        instance_center_heatmap_prediction = self.instance_center_head(x)
+        instance_center_vector_prediction = self.instance_regression_head(x)
+        return x, instance_center_heatmap_prediction, instance_center_vector_prediction
 
 
 class LiftSplatShoot(nn.Module):
