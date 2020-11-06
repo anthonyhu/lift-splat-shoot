@@ -174,6 +174,8 @@ def eval_model_iou(version,
 
     device = torch.device('cuda:0')
 
+    print(f'Model name: {MODEL_NAME}')
+    print(MODEL_CONFIG)
     model = compile_model(grid_conf, data_aug_conf, outC=N_CLASSES, name=MODEL_NAME, model_config=MODEL_CONFIG)
     print('Loading weights from:', model_weights)
     model.load_state_dict(torch.load(model_weights))
