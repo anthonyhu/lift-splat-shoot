@@ -1,11 +1,12 @@
 import torch
 
+# set ignore index to 0 for vis
 def convert_instance_mask_to_center_and_regression_label(instance_mask, num_instances, ignore_index=255):
     t, h, w = instance_mask.shape
     instance_ids = range(num_instances)
     center_label = torch.zeros(t, w, h, 1)
-    future_displacement_label = torch.zeros(t, w, h, 2)
-    regression_label = torch.zeros(t, w, h, 2)
+    future_displacement_label = ignore_index * torch.ones(t, w, h, 2)
+    regression_label = ignore_index * torch.ones(t, w, h, 2)
 
     for instance_id in instance_ids:
         instance_points = torch.nonzero(instance_mask == instance_id)
