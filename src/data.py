@@ -22,11 +22,11 @@ from glob import glob
 from .tools import get_lidar_data, img_transform, normalize_img, gen_dx_bx, get_nusc_maps, get_local_map, \
     convert_egopose_to_matrix
 from .utils import convert_figure_numpy
-from .constants import VEHICLES_ID, DRIVEABLE_AREA_ID, LINE_MARKINGS_ID
+from .constants import DRIVEABLE_AREA_ID, LINE_MARKINGS_ID
 
-# changed this from false to true
+
 class NuscData(torch.utils.data.Dataset):
-    def __init__(self, nusc, is_train, data_aug_conf, grid_conf, sequence_length=0, map_labels=True,
+    def __init__(self, nusc, is_train, data_aug_conf, grid_conf, sequence_length=0, map_labels=False,
                  dataroot=''):
         self.nusc = nusc
         self.is_train = is_train
@@ -215,8 +215,8 @@ class NuscData(torch.utils.data.Dataset):
 
         return torch.Tensor(img).long()
 
-    def get_static_label(self, rec, index):
-        # print(f'Generating static scene for dataset {self.mode} and index={index}')
+    def compute_static_label(self, rec, index):
+        print(f'Generating static scene for dataset {self.mode} and index={index}')
         dpi = 100
         height, width = (200, 200)
         driveable_area_color = (1.00, 0.50, 0.31)
@@ -289,23 +289,23 @@ class NuscData(torch.utils.data.Dataset):
         label = torch.Tensor(label).long()
         return label
 
-    def get_dynamic_label(self, rec, index):
+    def get_dynamic_label(self, rec):
         return self.get_binimg(rec)
 
     def get_static_label(self, rec, index):
+        if not self.map_labels:
+            return None
+
         # Load saved labels
-        label_path = os.path.join(self.dataroot, 'bev_label', self.mode, f'bev_label_{index:08d}.png')
+        label_path = os.path.join(self.dataroot, 'static_label', self.mode, f'static_label_{index:08d}.png')
 
         if os.path.isfile(label_path):
-            label = np.asarray(Image.open(label_path)).astype(np.int64)
-            label = torch.Tensor(label).long()
-            return label
+            static_label = np.asarray(Image.open(label_path)).astype(np.int64)
+            static_label = torch.Tensor(static_label).long()
+        else:
+            static_label = self.compute_static_label(rec, index)
 
-        if self.map_labels:
-            static_label = self.get_static_label(rec, index)
-            label = static_label
-
-        return label
+        return static_label
 
     def get_future_egomotion(self, rec, index):
         rec_t0 = rec
@@ -371,7 +371,7 @@ class SegmentationData(NuscData):
 
         cams = self.choose_cams()
         imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
-        binimg = self.get_dynamic_label(rec, index)
+        binimg = self.get_dynamic_label(rec)
         static_label = self.get_static_label(rec, index)
         future_egomotion = self.get_future_egomotion(rec, index)
         
@@ -401,8 +401,8 @@ class SequentialSegmentationData(SegmentationData):
                     index_t = previous_index_t
 
             imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
-            binimg = self.get_dynamic_label(rec, index_t)
-            static_label = self.get_static_label(rec, index)
+            binimg = self.get_dynamic_label(rec)
+            static_label = self.get_static_label(rec, index_t)
             future_egomotion = self.get_future_egomotion(rec, index_t)
 
             list_imgs.append(imgs)
@@ -423,6 +423,7 @@ class SequentialSegmentationData(SegmentationData):
 
         list_post_rots, list_post_trans, list_binimg = torch.stack(list_post_rots), torch.stack(list_post_trans), \
                                                        torch.stack(list_binimg)
+        list_static_label = torch.stack(list_static_label)
         list_future_egomotion = torch.stack(list_future_egomotion)
 
         return (list_imgs, list_rots, list_trans, list_intrins, list_post_rots, list_post_trans, list_binimg,

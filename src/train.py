@@ -172,7 +172,8 @@ def train(version,
     counter = 0
     for epoch in range(nepochs):
         np.random.seed()
-        for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, binimgs, future_egomotions) in enumerate(
+        for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, binimgs, static_labels, future_egomotions) in \
+                enumerate(
                 trainloader):
 
             t0 = time()

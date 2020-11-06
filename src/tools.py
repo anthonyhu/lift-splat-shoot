@@ -259,7 +259,7 @@ def get_val_info(model, valloader, loss_fn, device, use_tqdm=True, is_temporal=F
     loader = tqdm(valloader) if use_tqdm else valloader
     with torch.no_grad():
         for batch in loader:
-            allimgs, rots, trans, intrins, post_rots, post_trans, binimgs, future_egomotions = batch
+            allimgs, rots, trans, intrins, post_rots, post_trans, binimgs, static_labels, future_egomotions = batch
 
             if repeat_baseline:
                 b, s, n, c, h, w = allimgs.shape
@@ -616,7 +616,7 @@ def compute_egomotion_error(pred, gt):
     return positional_error, angular_error
 
 
-def save_static_labels(dataroot='/data/cvfs/ah2029/datasets/nuscenes', version='mini'):
+def save_static_labels(dataroot='/data/cvfs/ah2029/datasets/nuscenes', version='mini', n_processes=6):
     from src.data import SegmentationData
     from nuscenes.nuscenes import NuScenes
     from time import time
@@ -660,11 +660,10 @@ def save_static_labels(dataroot='/data/cvfs/ah2029/datasets/nuscenes', version='
         'Ncams': 5,
     }
 
-    pool = Pool(6)
+    pool = Pool(n_processes)
     for is_train in [True, False]:
         dataset = SegmentationData(nusc, is_train=is_train, data_aug_conf=data_aug_conf, grid_conf=grid_conf,
-                                   sequence_length=6, map_labels=True,
-                                   dataroot=dataroot)
+                                   sequence_length=0, map_labels=True, dataroot=dataroot)
         if is_train:
             mode = 'train'
         else:
@@ -688,8 +687,8 @@ def save_static_labels(dataroot='/data/cvfs/ah2029/datasets/nuscenes', version='
 def save_static_label_iter(i, dataset, dataroot, mode):
     imgs, rots, trans, intrins, post_rots, post_trans, binimg, static_label, future_egomotion = dataset[i]
 
-    output_path = os.path.join(dataroot, 'bev_label', mode)
+    output_path = os.path.join(dataroot, 'static_label', mode)
     os.makedirs(output_path, exist_ok=True)
-    label_path = os.path.join(output_path, f'bev_label_{i:08d}.png')
+    label_path = os.path.join(output_path, f'static_label_{i:08d}.png')
     static_label = Image.fromarray(static_label.numpy().astype(np.int32), mode='I')
     static_label.save(label_path)
