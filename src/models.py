@@ -14,9 +14,11 @@ from src.layers.temporal import SpatialGRU, Bottleneck3D, TemporalBlock
 from .tools import gen_dx_bx, cumsum_trick, QuickCumsum
 
 
+
 class Up(nn.Module):
     def __init__(self, in_channels, out_channels, scale_factor=2):
         super().__init__()
+
 
         self.up = nn.Upsample(scale_factor=scale_factor, mode='bilinear',
                               align_corners=True)
@@ -104,15 +106,41 @@ class BevEncode(nn.Module):
         self.layer3 = trunk.layer3
 
         self.up1 = Up(64+256, 256, scale_factor=4)
+        
         self.up2 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode='bilinear',
-                              align_corners=True),
+            self._upsample_layer(),
             nn.Conv2d(256, 128, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(128),
             nn.ReLU(inplace=True),
             nn.Conv2d(128, outC, kernel_size=1, padding=0),
         )
+        # self.instance_regression_head = nn.Sequential(
+        #     self._upsample_layer(mode='transpose_conv'),
+        #     nn.Conv2d(256, 128, kernel_size=3, padding=1, bias=False),
+        #     nn.BatchNorm2d(128),
+        #     nn.ReLU(inplace=True),
+        #     nn.Conv2d(128, 2, kernel_size=1, padding=0),
+        # )
+        # self.instance_center_head = nn.Sequential(
+        #     self._upsample_layer(mode='transpose_conv'),
+        #     nn.Conv2d(256, 128, kernel_size=3, padding=1, bias=False),
+        #     nn.BatchNorm2d(128),
+        #     nn.ReLU(inplace=True),
+        #     nn.Conv2d(128, 1, kernel_size=1, padding=0),
+        # )
 
+    def _upsample_layer(self, mode='bilinear', channels=256, kernel_size = 3):
+        if mode == 'bilinear':
+            return nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        if mode == 'transpose_conv':
+            return nn.ConvTranspose2d(
+                channels,
+                channels,
+                kernel_size=kernel_size,
+                stride=2,
+                padding=1,
+            )
+        raise ValueError("Unknown upsample mode")
     def forward(self, x):
         x = self.conv1(x)
         x = self.bn1(x)

@@ -335,20 +335,10 @@ class NuscData(torch.utils.data.Dataset):
         bin_image_np, instance_image_np, instance_map = self.get_occupancy_map_and_instance_labels(rec, instance_map)
         bin_image = torch.from_numpy(bin_image_np)
         instance_image = torch.from_numpy(instance_image_np)
-        print(f'writing data to cache for index - {index}')
-        self.write_data_to_cache(index, bin_image_np, instance_image_np, instance_map)
+        # print(f'writing data to cache for index - {index}')
+        # self.write_data_to_cache(index, bin_image_np, instance_image_np, instance_map)
         
         return bin_image, instance_image, instance_map
-        
-        
-
-        # if self.map_labels:
-        #     static_label = self.get_static_label(rec, index)
-        #     # Add car labels
-        #     static_label[binimg == 1] = VEHICLES_ID
-        #     label = static_label
-
-        return label
 
     def get_future_egomotion(self, rec, index):
         rec_t0 = rec
@@ -505,6 +495,7 @@ def compile_data(version, dataroot, data_aug_conf, grid_conf, bsz,
                                               num_workers=nworkers,
                                               drop_last=True,
                                               worker_init_fn=worker_rnd_init)
+    
     valloader = torch.utils.data.DataLoader(valdata, batch_size=bsz,
                                             shuffle=False,
                                             num_workers=nworkers)
