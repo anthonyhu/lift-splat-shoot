@@ -680,7 +680,7 @@ def save_static_labels(dataroot='/data/cvfs/ah2029/datasets/nuscenes', version='
 
 
 def save_static_label_iter(i, dataset, dataroot, mode):
-    imgs, rots, trans, intrins, post_rots, post_trans, binimg = dataset[i]
+    imgs, rots, trans, intrins, post_rots, post_trans, binimg, future_egomotion = dataset[i]
 
     output_path = os.path.join(dataroot, 'bev_label', mode)
     os.makedirs(output_path, exist_ok=True)
