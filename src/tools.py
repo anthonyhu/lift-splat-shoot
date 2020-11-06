@@ -588,6 +588,7 @@ def compute_egomotion_error(pred, gt):
     pred_translation = pred[..., :3, 3]
     gt_translation = gt[..., :3, 3]
     positional_error = np.linalg.norm(pred_translation - gt_translation, ord=2, axis=-1)
+    positional_error = positional_error.mean()
 
     # Angular error
     b, s = pred.shape[:2]
@@ -601,8 +602,9 @@ def compute_egomotion_error(pred, gt):
     # Dot product between the 3D vectors
     dot_product = np.sum(pred_rotation_vector * gt_rotation_vector, axis=-1)
     angular_error = np.arccos(dot_product) * 180 / np.pi
+    angular_error = angular_error[~np.isnan(angular_error)].mean()
 
-    return positional_error.mean(), angular_error.mean()
+    return positional_error, angular_error
 
 
 def save_static_labels(dataroot='/data/cvfs/ah2029/datasets/nuscenes', version='mini'):
