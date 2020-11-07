@@ -577,8 +577,8 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
 
         self.future_pred_in_channels = future_pred_in_channels
 
+        self.future_indices = None
         if self.probabilistic:
-            self.future_indices = None
             self.present_distribution = DistributionModule(
                 self.future_pred_in_channels, self.latent_dim,
             )
