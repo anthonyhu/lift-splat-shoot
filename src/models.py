@@ -522,6 +522,51 @@ class FuturePrediction(torch.nn.Module):
             return output, pred_future_egomotions
 
 
+class FuturePredictionAutoregressive(torch.nn.Module):
+    def __init__(self, in_channels, latent_dim, predict_future_egomotion=False, n_gru_blocks=3, n_res_layers=3):
+        super().__init__()
+        self.predict_future_egomotion = predict_future_egomotion
+        self.n_gru_blocks = n_gru_blocks
+
+        # Transform the input from latent_dim to in_channels
+        self.conv_match_channel_hidden_state = nn.Conv2d(latent_dim, in_channels, kernel_size=1)
+
+        # Convolutional recurrent model with z_t as an initial hidden state and inputs the sample
+        # from the probabilistic model. The architecture of the model is:
+        # [Spatial GRU - [Bottleneck] x n_res_layers] x n_gru_blocks
+        self.spatial_grus = []
+        self.res_blocks = []
+
+        for i in range(self.n_gru_blocks):
+            hidden_size = in_channels
+            self.spatial_grus.append(SpatialGRU(in_channels, hidden_size, autoregressive=True))
+            self.res_blocks.append(torch.nn.Sequential(*[ResBlock(in_channels)
+                                                         for _ in range(n_res_layers)]))
+
+        self.spatial_grus = torch.nn.ModuleList(self.spatial_grus)
+        self.res_blocks = torch.nn.ModuleList(self.res_blocks)
+
+    def forward(self, z, hidden_state, future_egomotions, inference=False, pose_net=None):
+        # pylint: disable=arguments-differ
+        # z has shape (b, n_future, c, h, w), hidden_state (b, c, h, w) and is the sample from the distribution
+        if not inference:
+            hidden_state = self.conv_match_channel_hidden_state(hidden_state)
+            for i in range(self.n_gru_blocks):
+                if self.predict_future_egomotion and i == 0:
+                    # Warp features with respect to future ego-motion
+                    flow = future_egomotions
+                else:
+                    flow = None
+
+                z = self.spatial_grus[i](z, hidden_state, flow)
+                b, n_future, c, h, w = z.shape
+
+                z = self.res_blocks[i](z.view(b * n_future, c, h, w))
+                z = z.view(b, n_future, c, h, w)
+
+            return z, None
+
+
 class PoseNet(nn.Module):
     def __init__(self, in_channels):
         super().__init__()
@@ -554,6 +599,7 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         self.n_future = model_config['n_future']  # 5
         self.latent_dim = model_config['latent_dim']  # 16
         self.probabilistic = model_config['probabilistic']
+        self.autoregressive_future_prediction = model_config['autoregressive_future_prediction']
         self.predict_future_egomotion = model_config['predict_future_egomotion']  # False
         self.temporal_model_name = model_config['temporal_model_name']  # gru
         self.disable_bev_prediction = model_config['disable_bev_prediction']
@@ -595,10 +641,17 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
                 n_future=self.n_future,
             )
 
-        self.future_prediction = FuturePrediction(
-            in_channels=self.future_pred_in_channels, latent_dim=self.latent_dim,
-            predict_future_egomotion=self.predict_future_egomotion,
-        )
+        if not self.autoregressive_future_prediction:
+            self.future_prediction = FuturePrediction(
+                in_channels=self.future_pred_in_channels, latent_dim=self.latent_dim,
+                predict_future_egomotion=self.predict_future_egomotion,
+            )
+
+        else:
+            self.future_prediction = FuturePredictionAutoregressive(
+                in_channels=self.future_pred_in_channels, latent_dim=self.latent_dim,
+                predict_future_egomotion=self.predict_future_egomotion,
+            )
 
         if not self.disable_bev_prediction:
             self.bevencode = BevEncode(inC=self.future_pred_in_channels, outC=outC)
@@ -656,23 +709,30 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
             output = {**output, **output_distribution}
 
         # Future prediction
-        hidden_state = present_features[:, 0]
-        b, _, h, w = hidden_state.shape
 
-        if self.probabilistic:
-            latent_tensor = sample.expand(-1, self.n_future, -1, -1, -1)
+        b, _, _, h, w = present_features.shape
+        if not self.autoregressive_future_prediction:
+            hidden_state = present_features[:, 0]
+
+            if self.probabilistic:
+                future_prediction_input = sample.expand(-1, self.n_future, -1, -1, -1)
+            else:
+                future_prediction_input = hidden_state.new_zeros(b, self.n_future, self.latent_dim, h, w)
         else:
-            latent_tensor = hidden_state.new_zeros(b, self.n_future, self.latent_dim, h, w)
+            if self.probabilistic:
+                hidden_state = sample[:, 0]
+            else:
+                hidden_state = present_features.new_zeros(b, self.latent_dim, h, w)
 
-        # shape (b, n_future, 88, 200, 200)
+            future_prediction_input = z[:, (self.receptive_field - 1):-1]
+
         z_future, pred_future_egomotions = self.future_prediction(
-            latent_tensor, hidden_state, future_egomotions[:, (self.receptive_field - 1):-1],
+            future_prediction_input, hidden_state, future_egomotions[:, (self.receptive_field - 1):-1],
             inference=inference, pose_net=self.pose_net,
         )
 
         # Decode present
-        z_t = hidden_state.unsqueeze(1)
-        z_future = torch.cat([z_t, z_future], dim=1)
+        z_future = torch.cat([present_features, z_future], dim=1)
 
         b, new_s = z_future.shape[:2]
 

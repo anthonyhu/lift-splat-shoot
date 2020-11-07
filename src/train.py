@@ -26,6 +26,7 @@ OUTPUT_PATH = './runs/debug'
 PREDICT_FUTURE_EGOMOTION = True
 TEMPORAL_MODEL_NAME = 'gru'
 PROBABILISTIC = True
+AUTOREGRESSIVE_FUTURE_PREDICTION = True
 
 MODEL_NAME = 'temporal'
 RECEPTIVE_FIELD = 3
@@ -33,7 +34,7 @@ N_FUTURE = 3
 
 LOSS_WEIGHTS = {'dynamic_agents': 1.0,
                 'static_agents': 0.5,
-                'future_egomotion': 1.0,
+                'future_egomotion': 0.1,
                 'kl': 0.01}
 #
 # if 'direwolf' in socket.gethostname():
@@ -45,6 +46,7 @@ MODEL_CONFIG = {'receptive_field': RECEPTIVE_FIELD,
                 'n_future': N_FUTURE,
                 'latent_dim': 16,
                 'probabilistic': PROBABILISTIC,
+                'autoregressive_future_prediction': AUTOREGRESSIVE_FUTURE_PREDICTION,
                 'predict_future_egomotion': PREDICT_FUTURE_EGOMOTION,
                 'temporal_model_name': TEMPORAL_MODEL_NAME,
                 'disable_bev_prediction': DISABLE_BEV_PREDICTION,
@@ -96,6 +98,7 @@ def train(version,
 
     print('Model config:')
     print(MODEL_CONFIG)
+    print(LOSS_WEIGHTS)
     print(f'Number of classes: {N_CLASSES}')
     print(f'Session: {logdir}')
 

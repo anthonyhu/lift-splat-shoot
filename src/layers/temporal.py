@@ -11,11 +11,12 @@ class SpatialGRU(nn.Module):
     """A GRU cell that takes an input tensor [BxTxCxHxW] and an optional previous state and passes a
     convolutional gated recurrent unit over the data"""
 
-    def __init__(self, input_size, hidden_size, gru_bias_init=0.0, norm='bn', activation='relu'):
+    def __init__(self, input_size, hidden_size, gru_bias_init=0.0, norm='bn', activation='relu', autoregressive=False):
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.gru_bias_init = gru_bias_init
+        self.autoregressive = autoregressive
 
         self.conv_update = nn.Conv2d(input_size + hidden_size, hidden_size, kernel_size=3, bias=True, padding=1)
         self.conv_reset = nn.Conv2d(input_size + hidden_size, hidden_size, kernel_size=3, bias=True, padding=1)
@@ -34,11 +35,15 @@ class SpatialGRU(nn.Module):
         rnn_output = []
         rnn_state = torch.zeros(b, self.hidden_size, h, w, device=x.device) if state is None else state
         for t in range(timesteps):
-
+            x_t = x[:, t]
             if flow is not None:
-                rnn_state = self.warp_features(rnn_state, flow[:, t])
+                if not self.autoregressive:
+                    rnn_state = self.warp_features(rnn_state, flow[:, t])
+                else:
+                    x_t = self.warp_features(x_t, flow[:, t])
+
             # propagate rnn state
-            rnn_state = self.gru_cell(x[:, t], rnn_state)
+            rnn_state = self.gru_cell(x_t, rnn_state)
             rnn_output.append(rnn_state)
 
         # reshape rnn output to batch tensor
