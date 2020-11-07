@@ -600,6 +600,7 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         self.latent_dim = model_config['latent_dim']  # 16
         self.probabilistic = model_config['probabilistic']
         self.autoregressive_future_prediction = model_config['autoregressive_future_prediction']
+        self.autoregressive_l2_loss = model_config['autoregresive_l2_loss']
         self.predict_future_egomotion = model_config['predict_future_egomotion']  # False
         self.temporal_model_name = model_config['temporal_model_name']  # gru
         self.disable_bev_prediction = model_config['disable_bev_prediction']
@@ -699,6 +700,8 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         # Temporal model
         z = self.temporal_model(x)
 
+        output['z'] = z
+
         # Split into present and future features (for the probabilistic model)
         present_features, future_features = self._extract_present_future_features(z)
 
@@ -730,6 +733,8 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
             future_prediction_input, hidden_state, future_egomotions[:, (self.receptive_field - 1):-1],
             inference=inference, pose_net=self.pose_net,
         )
+
+        output['z_future_pred'] = z_future
 
         # Decode present
         z_future = torch.cat([present_features, z_future], dim=1)

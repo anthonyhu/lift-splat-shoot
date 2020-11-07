@@ -18,15 +18,16 @@ from .losses import probabilistic_kl_loss
 from .tools import get_batch_iou, compute_miou, get_val_info, mat2pose_vec, pose_vec2mat, compute_egomotion_error
 from .utils import print_model_spec, set_module_grad
 
-BATCH_SIZE = 1
-TAG = 'debug'
-OUTPUT_PATH = './runs/debug'
+BATCH_SIZE = 3
+TAG = 'autoregressive_l2_loss'
+OUTPUT_PATH = './runs/probabilistic'
 
 
 PREDICT_FUTURE_EGOMOTION = True
 TEMPORAL_MODEL_NAME = 'gru'
 PROBABILISTIC = True
 AUTOREGRESSIVE_FUTURE_PREDICTION = True
+AUTOREGRESSIVE_L2_LOSS = True
 
 MODEL_NAME = 'temporal'
 RECEPTIVE_FIELD = 3
@@ -35,7 +36,9 @@ N_FUTURE = 3
 LOSS_WEIGHTS = {'dynamic_agents': 1.0,
                 'static_agents': 0.5,
                 'future_egomotion': 0.1,
-                'kl': 0.01}
+                'kl': 0.01,
+                'autoregressive': 0.1,
+                }
 #
 # if 'direwolf' in socket.gethostname():
 #     RECEPTIVE_FIELD = 2
@@ -47,6 +50,7 @@ MODEL_CONFIG = {'receptive_field': RECEPTIVE_FIELD,
                 'latent_dim': 16,
                 'probabilistic': PROBABILISTIC,
                 'autoregressive_future_prediction': AUTOREGRESSIVE_FUTURE_PREDICTION,
+                'autoregresive_l2_loss': AUTOREGRESSIVE_L2_LOSS,
                 'predict_future_egomotion': PREDICT_FUTURE_EGOMOTION,
                 'temporal_model_name': TEMPORAL_MODEL_NAME,
                 'disable_bev_prediction': DISABLE_BEV_PREDICTION,
@@ -175,6 +179,9 @@ def train(version,
     if PROBABILISTIC:
         losses_fn['kl'] = probabilistic_kl_loss
 
+    if AUTOREGRESSIVE_L2_LOSS:
+        losses_fn['autoregressive'] = torch.nn.MSELoss()
+
     writer = SummaryWriter(logdir=logdir)
     val_step = 10 if version == 'mini' else 10000
     train_eval_step = 10 if version == 'mini' else 100
@@ -226,6 +233,10 @@ def train(version,
 
             if PROBABILISTIC:
                 losses['kl'] = losses_fn['kl'](out)
+
+            if AUTOREGRESSIVE_L2_LOSS:
+                losses['autoregressive'] = losses_fn['autoregressive'](out['z'][:, model.receptive_field:],
+                                                                       out['z_future_pred'])
 
             # Calculate total loss
             loss = torch.zeros(1, dtype=torch.float32).to(device)

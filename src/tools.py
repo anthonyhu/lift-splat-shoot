@@ -317,6 +317,10 @@ def get_val_info(model, valloader, losses_fn, device, use_tqdm=True, is_temporal
             if model.probabilistic:
                 losses['kl'] = losses_fn['kl'](out)
 
+            if model.autoregressive_l2_loss:
+                losses['autoregressive'] = losses_fn['autoregressive'](out['z'][:, model.receptive_field:],
+                                                                       out['z_future_pred'])
+
             # Calculate total loss
             loss = torch.zeros(1, dtype=torch.float32).to(device)
 
