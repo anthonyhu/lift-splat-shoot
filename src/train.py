@@ -14,6 +14,7 @@ import os
 
 from .models import compile_model
 from .data import compile_data
+from .losses import probabilistic_kl_loss
 from .tools import get_batch_iou, compute_miou, get_val_info, mat2pose_vec, pose_vec2mat, compute_egomotion_error
 from .utils import print_model_spec, set_module_grad
 
@@ -24,21 +25,26 @@ OUTPUT_PATH = './runs/debug'
 
 PREDICT_FUTURE_EGOMOTION = True
 TEMPORAL_MODEL_NAME = 'gru'
-
-DISABLE_BEV_PREDICTION = False
+PROBABILISTIC = True
 
 MODEL_NAME = 'temporal'
 RECEPTIVE_FIELD = 3
 N_FUTURE = 3
 
-if 'direwolf' in socket.gethostname():
-    RECEPTIVE_FIELD = 2
-    N_FUTURE = 2
+LOSS_WEIGHTS = {'dynamic_agents': 1.0,
+                'static_agents': 0.5,
+                'future_egomotion': 1.0,
+                'kl': 0.01}
+#
+# if 'direwolf' in socket.gethostname():
+#     RECEPTIVE_FIELD = 2
+#     N_FUTURE = 2
 
-
+DISABLE_BEV_PREDICTION = False
 MODEL_CONFIG = {'receptive_field': RECEPTIVE_FIELD,
                 'n_future': N_FUTURE,
-                'latent_dim': 1,
+                'latent_dim': 16,
+                'probabilistic': PROBABILISTIC,
                 'predict_future_egomotion': PREDICT_FUTURE_EGOMOTION,
                 'temporal_model_name': TEMPORAL_MODEL_NAME,
                 'disable_bev_prediction': DISABLE_BEV_PREDICTION,
@@ -157,12 +163,14 @@ def train(version,
 
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    loss_fn = torch.nn.CrossEntropyLoss(weight=torch.Tensor(weight)).to(device)
+    losses_fn = {}
+    losses_fn['dynamic_agents'] = torch.nn.CrossEntropyLoss(weight=torch.Tensor(weight)).to(device)
 
     if PREDICT_FUTURE_EGOMOTION:
-        egomotion_loss_fn = torch.nn.MSELoss()
-    else:
-        egomotion_loss_fn = None
+        losses_fn['future_egomotion'] = torch.nn.MSELoss()
+
+    if PROBABILISTIC:
+        losses_fn['kl'] = probabilistic_kl_loss
 
     writer = SummaryWriter(logdir=logdir)
     val_step = 10 if version == 'mini' else 10000
@@ -205,12 +213,22 @@ def train(version,
 
                     future_egomotions_vec = mat2pose_vec(future_egomotions)
 
-            loss = torch.zeros(1, dtype=torch.float32).to(device)
+            losses = {}
             if not DISABLE_BEV_PREDICTION:
-                loss += loss_fn(preds, binimgs)
+                losses['dynamic_agents'] = losses_fn['dynamic_agents'](preds, binimgs)
 
             if PREDICT_FUTURE_EGOMOTION:
-                loss += egomotion_loss_fn(out['future_egomotions'], future_egomotions_vec)
+                losses['future_egomotion'] = losses_fn['future_egomotion'](out['future_egomotions'],
+                                                                           future_egomotions_vec)
+
+            if PROBABILISTIC:
+                losses['kl'] = losses_fn['kl'](out)
+
+            # Calculate total loss
+            loss = torch.zeros(1, dtype=torch.float32).to(device)
+
+            for key, value in losses.items():
+                loss += LOSS_WEIGHTS[key] * value
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
@@ -219,8 +237,11 @@ def train(version,
             t1 = time()
 
             if counter % 10 == 0:
-                print(f'Iteration {counter}, loss={loss.item()}, step time ={t1 - t0}')
-                writer.add_scalar('train/loss', loss, counter)
+                print(f'Iteration {counter}, total loss={loss.item()}, step time ={t1 - t0}')
+                writer.add_scalar('train/total_loss', loss.item(), counter)
+                for key, value in losses.items():
+                    print(f'train/{key}_loss={LOSS_WEIGHTS[key] * value.item()}')
+                    writer.add_scalar(f'train/{key}_loss', LOSS_WEIGHTS[key] * value.item(), counter)
 
             if counter % train_eval_step == 0:
                 writer.add_scalar('train/epoch', epoch, counter)
@@ -248,8 +269,8 @@ def train(version,
                     print(f'train angular_error (in degrees): {angular_error}')
 
             if counter % val_step == 0:
-                val_info = get_val_info(model, valloader, loss_fn, device, is_temporal=(MODEL_NAME == 'temporal'),
-                                        n_classes=N_CLASSES, egomotion_loss_fn=egomotion_loss_fn)
+                val_info = get_val_info(model, valloader, losses_fn, device, is_temporal=(MODEL_NAME == 'temporal'),
+                                        n_classes=N_CLASSES, loss_weights=LOSS_WEIGHTS)
                 print('VAL', val_info)
                 writer.add_scalar('val/loss', val_info['loss'], counter)
                 writer.add_scalar('val/vehicles_iou', val_info['vehicles_iou'], counter)

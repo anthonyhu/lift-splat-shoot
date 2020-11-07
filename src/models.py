@@ -9,9 +9,10 @@ from torch import nn
 from efficientnet_pytorch import EfficientNet
 from torchvision.models.resnet import resnet18
 
-from src.layers.convolutions import ResBlock, ConvBlock
+from src.layers.convolutions import ResBlock, ConvBlock, Bottleneck
 from src.layers.temporal import SpatialGRU, Bottleneck3D, TemporalBlock
 from .tools import gen_dx_bx, cumsum_trick, QuickCumsum, pose_vec2mat
+from .constants import MIN_LOG_SIGMA, MAX_LOG_SIGMA
 
 
 class Up(nn.Module):
@@ -288,7 +289,6 @@ class TemporalModel(nn.Module):
 
     def create_model(self):
         if self.name == 'gru':
-#            return SpatialGRU(self.in_channels, self.in_channels, norm=self.norm, activation=self.activation)
             return nn.Sequential(SpatialGRU(self.in_channels, self.in_channels, norm=self.norm,
                                             activation=self.activation),
                                  SpatialGRU(self.in_channels, self.in_channels, norm=self.norm,
@@ -323,7 +323,6 @@ class TemporalModel(nn.Module):
         elif self.name == 'identity':
             return nn.Sequential()
 
-
     def forward(self, x):
         if self.name == 'gru':
             return self.model(x)
@@ -338,6 +337,101 @@ class TemporalModel(nn.Module):
     @property
     def receptive_field(self):
         return self._receptive_field
+
+
+class DistributionEncoder(nn.Module):
+    """Encodes z_t and (z_{t+1}, z_{t+2}, ..., z_{t+N}) with z_t the dynamics features, and N the number of
+    predicted future frames.
+    """
+
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        future_distribution=False,
+        future_in_channels=None,
+        n_future=None,
+    ):
+        super().__init__()
+        self.future_distribution = future_distribution
+        self.n_future = n_future
+
+        encoder_in_channels = in_channels
+        if future_distribution:
+            self.future_compression = Bottleneck(
+                future_in_channels, out_channels=in_channels, kernel_size=1,
+            )
+            encoder_in_channels += in_channels
+
+        self._encoder = nn.Sequential(
+            Bottleneck(encoder_in_channels, out_channels=out_channels, downsample=True),
+            Bottleneck(out_channels, out_channels=out_channels, downsample=True),
+            Bottleneck(out_channels, out_channels=out_channels, downsample=True),
+            Bottleneck(out_channels, out_channels=out_channels, downsample=True),
+        )
+
+    def forward(self, z_t, z_future=None):
+        output = []
+        b, s, _, h, w = z_t.shape
+
+        for t in range(s):
+            input_t = z_t[:, t]
+            if self.future_distribution:
+                compression_input = z_future.view(b, -1, h, w)
+                input_future_t = self.future_compression(compression_input)
+                input_t = torch.cat([input_t, input_future_t], dim=1)
+
+            output.append(self._encoder(input_t))
+
+        return self.pack_sequence_dim(torch.stack(output, dim=1))
+
+    @staticmethod
+    def pack_sequence_dim(x):
+        b, s = x.shape[:2]
+        return x.view(b * s, *x.shape[2:])
+
+
+class DistributionModule(nn.Module):
+    """
+    A convolutional net that parametrises a diagonal Gaussian distribution.
+    """
+
+    def __init__(
+        self,
+        in_channels,
+        latent_dim,
+        future_distribution=False,
+        future_in_channels=None,
+        n_future=None,
+    ):
+        super().__init__()
+        self.compress_dim = in_channels // 2
+        self.latent_dim = latent_dim
+        self.n_future = n_future
+        self.encoder = DistributionEncoder(
+            in_channels,
+            self.compress_dim,
+            future_distribution=future_distribution,
+            future_in_channels=future_in_channels,
+            n_future=n_future,
+        )
+        # TODO: Apply Average pooling to each z_{t+i} feature before concatenating.
+        self.out_module = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1), nn.Conv2d(self.compress_dim, out_channels=2 * self.latent_dim, kernel_size=1)
+        )
+
+    def forward(self, z_t, z_future=None):
+        b, s = z_t.shape[:2]
+        assert s == 1
+        encoding = self.encoder(z_t, z_future)
+
+        mu_log_sigma = self.out_module(encoding).view(b, s, 2 * self.latent_dim)
+        mu = mu_log_sigma[:, :, :self.latent_dim]
+        log_sigma = mu_log_sigma[:, :, self.latent_dim:]
+
+        # clip the log_sigma value for numerical stability
+        log_sigma = torch.clamp(log_sigma, MIN_LOG_SIGMA, MAX_LOG_SIGMA)
+        return mu, log_sigma
 
 
 class FuturePrediction(torch.nn.Module):
@@ -459,6 +553,7 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         self.receptive_field = model_config['receptive_field']  # 3
         self.n_future = model_config['n_future']  # 5
         self.latent_dim = model_config['latent_dim']  # 16
+        self.probabilistic = model_config['probabilistic']
         self.predict_future_egomotion = model_config['predict_future_egomotion']  # False
         self.temporal_model_name = model_config['temporal_model_name']  # gru
         self.disable_bev_prediction = model_config['disable_bev_prediction']
@@ -480,18 +575,60 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         else:
             raise ValueError(f'Unknown temporal model: {self.temporal_model_name}')
 
+        self.future_pred_in_channels = future_pred_in_channels
+
+        if self.probabilistic:
+            self.future_indices = None
+            self.present_distribution = DistributionModule(
+                self.future_pred_in_channels, self.latent_dim,
+            )
+
+            future_indices, future_in_channels = self._calculate_future_indices_and_channels()
+            assert future_in_channels > 0
+            self.future_indices = future_indices
+
+            self.future_distribution = DistributionModule(
+                self.future_pred_in_channels,
+                self.latent_dim,
+                future_distribution=True,
+                future_in_channels=future_in_channels,
+                n_future=self.n_future,
+            )
+
         self.future_prediction = FuturePrediction(
-            in_channels=future_pred_in_channels, latent_dim=self.latent_dim,
+            in_channels=self.future_pred_in_channels, latent_dim=self.latent_dim,
             predict_future_egomotion=self.predict_future_egomotion,
         )
 
         if not self.disable_bev_prediction:
-            self.bevencode = BevEncode(inC=future_pred_in_channels, outC=outC)
+            self.bevencode = BevEncode(inC=self.future_pred_in_channels, outC=outC)
 
         if self.predict_future_egomotion:
-            self.pose_net = PoseNet(future_pred_in_channels)
+            self.pose_net = PoseNet(self.future_pred_in_channels)
 
-    def forward(self, imgs, rots, trans, intrins, post_rots, post_trans, future_egomotions, inference=False):
+    def _calculate_future_indices_and_channels(self):
+        """ Calculates which indices would be used for the future distribution """
+        # For example if receptive_field_t=5 and n_future=10, the indices will be [9, 14]
+        seq_len = self.receptive_field + self.n_future
+        future_indices = list(range(self.receptive_field - 1, seq_len, self.receptive_field))
+        future_indices = future_indices[1:]
+        future_in_channels = len(future_indices) * self.future_pred_in_channels
+
+        return future_indices, future_in_channels
+
+    def _extract_present_future_features(self, z):
+        present_features = z[:, (self.receptive_field - 1):self.receptive_field].contiguous()
+
+        # Future features for the future distribution
+        if self.future_indices is None:
+            future_features = None
+        else:
+            future_features = z[:, self.future_indices].contiguous()
+
+        return present_features, future_features
+
+    def forward(self, imgs, rots, trans, intrins, post_rots, post_trans, future_egomotions, inference=False,
+                noise=None):
         output = {}
         b, s, n, c, h, w = imgs.shape
         # Reshape
@@ -509,11 +646,23 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         # Temporal model
         z = self.temporal_model(x)
 
-        # Future prediction
-        hidden_state = z[:, (self.receptive_field - 1)]  # Only take the present element
+        # Split into present and future features (for the probabilistic model)
+        present_features, future_features = self._extract_present_future_features(z)
 
+        if self.probabilistic:
+            # Do probabilistic computation
+            sample, output_distribution = self.distribution_forward(present_features, future_features, noise)
+
+            output = {**output, **output_distribution}
+
+        # Future prediction
+        hidden_state = present_features[:, 0]
         b, _, h, w = hidden_state.shape
-        latent_tensor = hidden_state.new_zeros(b, self.n_future, self.latent_dim, h, w)
+
+        if self.probabilistic:
+            latent_tensor = sample.expand(-1, self.n_future, -1, -1, -1)
+        else:
+            latent_tensor = hidden_state.new_zeros(b, self.n_future, self.latent_dim, h, w)
 
         # shape (b, n_future, 88, 200, 200)
         z_future, pred_future_egomotions = self.future_prediction(
@@ -542,6 +691,55 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         output['future_egomotions'] = pred_future_egomotions
 
         return output
+
+    def distribution_forward(self, present_features, future_features, noise):
+        """
+        Inputs:
+            present_features: 5-D output from dynamics module with shape
+            future_features: 5-D output from dynamics module with shape
+            noise: a sample from a (0, 1) gaussian with shape (b, s, latent_dim). If None, will sample in function
+
+        Returns:
+            sample: sample taken from present/future distribution, broadcast to shape (b, s, latent_dim, h, w)
+            present_distribution_mu: shape (b, s, latent_dim)
+            present_distribution_log_sigma: shape (b, s, latent_dim)
+            future_distribution_mu: shape (b, s, latent_dim)
+            future_distribution_log_sigma: shape (b, s, latent_dim)
+        """
+        b, s, _, h, w = present_features.size()
+        assert s == 1
+
+        present_mu, present_log_sigma = None, None
+        future_mu, future_log_sigma = None, None
+        if self.probabilistic:
+            present_mu, present_log_sigma = self.present_distribution(present_features, None)
+            future_mu, future_log_sigma = self.future_distribution(present_features, future_features)
+
+            if noise is None:
+                if self.training:
+                    noise = torch.randn_like(present_mu)
+                else:
+                    noise = torch.zeros_like(present_mu)
+            if self.training:
+                mu = future_mu
+                sigma = torch.exp(future_log_sigma)
+            else:
+                mu = present_mu
+                sigma = torch.exp(present_log_sigma)
+            sample = mu + sigma * noise
+
+            # Spatially broadcast sample to the dimensions of present_features
+            sample = sample.view(b, s, self.latent_dim, 1, 1).expand(b, s, self.latent_dim, h, w)
+        else:
+            sample = None
+
+        output_distribution = {'present_mu': present_mu,
+                               'present_log_sigma': present_log_sigma,
+                               'future_mu': future_mu,
+                               'future_log_sigma': future_log_sigma,
+                               }
+
+        return sample, output_distribution
 
 
 def compile_model(grid_conf, data_aug_conf, outC, name='basic', model_config={}):

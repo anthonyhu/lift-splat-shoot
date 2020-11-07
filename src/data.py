@@ -402,7 +402,8 @@ class SequentialSegmentationData(SegmentationData):
 
             imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
             binimg = self.get_dynamic_label(rec)
-            static_label = self.get_static_label(rec, index_t)
+            if self.map_labels:
+                static_label = self.get_static_label(rec, index_t)
             future_egomotion = self.get_future_egomotion(rec, index_t)
 
             list_imgs.append(imgs)
@@ -412,7 +413,8 @@ class SequentialSegmentationData(SegmentationData):
             list_post_rots.append(post_rots)
             list_post_trans.append(post_trans)
             list_binimg.append(binimg)
-            list_static_label.append(static_label)
+            if self.map_labels:
+                list_static_label.append(static_label)
             list_future_egomotion.append(future_egomotion)
 
             previous_rec = rec
@@ -423,7 +425,8 @@ class SequentialSegmentationData(SegmentationData):
 
         list_post_rots, list_post_trans, list_binimg = torch.stack(list_post_rots), torch.stack(list_post_trans), \
                                                        torch.stack(list_binimg)
-        list_static_label = torch.stack(list_static_label)
+        if self.map_labels:
+            list_static_label = torch.stack(list_static_label)
         list_future_egomotion = torch.stack(list_future_egomotion)
 
         return (list_imgs, list_rots, list_trans, list_intrins, list_post_rots, list_post_trans, list_binimg,

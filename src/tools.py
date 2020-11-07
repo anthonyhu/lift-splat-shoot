@@ -245,8 +245,8 @@ def get_batch_iou(preds, binimgs):
     return intersect, union, intersect / union if (union > 0) else 1.0
 
 
-def get_val_info(model, valloader, loss_fn, device, use_tqdm=True, is_temporal=False, repeat_baseline=False,
-                 receptive_field=0, n_classes=0, egomotion_loss_fn=None):
+def get_val_info(model, valloader, losses_fn, device, use_tqdm=True, is_temporal=False, loss_weights=None,
+                 repeat_baseline=False, receptive_field=0, n_classes=0):
     t0 = time()
     model.eval()
     total_loss = 0.0
@@ -307,12 +307,21 @@ def get_val_info(model, valloader, loss_fn, device, use_tqdm=True, is_temporal=F
                     future_egomotions_vec = mat2pose_vec(future_egomotions)
 
             # loss
-            loss = torch.zeros(1, dtype=torch.float32).to(device)
+            losses = {}
             if not model.disable_bev_prediction:
-                loss += loss_fn(preds, binimgs)
+                losses['dynamic_agents'] = losses_fn['dynamic_agents'](preds, binimgs)
 
             if model.predict_future_egomotion:
-                loss += egomotion_loss_fn(out['future_egomotions'], future_egomotions_vec)
+                losses['future_egomotion'] = losses_fn['future_egomotion'](out['future_egomotions'],
+                                                                           future_egomotions_vec)
+            if model.probabilistic:
+                losses['kl'] = losses_fn['kl'](out)
+
+            # Calculate total loss
+            loss = torch.zeros(1, dtype=torch.float32).to(device)
+
+            for key, value in losses.items():
+                loss += loss_weights[key] * value
 
             total_loss += loss.item()
 
