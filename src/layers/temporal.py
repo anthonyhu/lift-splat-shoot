@@ -57,7 +57,7 @@ class SpatialGRU(nn.Module):
 
         # Normalise translation to [-1, 1]
         # -1 because the bird's-eye view axes are upside down
-        translation /= -BEV_METERS
+        translation = translation / (-BEV_METERS)
 
         cos_theta = torch.cos(angle)
         sin_theta = torch.sin(angle)
