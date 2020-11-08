@@ -461,7 +461,7 @@ class FuturePrediction(torch.nn.Module):
         # x has shape (b, n_future, c, h, w), hidden_state (b, c, h, w)
         if not inference:
             for i in range(self.n_gru_blocks):
-                if self.predict_future_egomotion and i == 0:
+                if self.predict_future_egomotion:
                     # Warp features with respect to future ego-motion
                     flow = future_egomotions
                 else:
@@ -491,26 +491,25 @@ class FuturePrediction(torch.nn.Module):
                 # z_t + sample
                 full_flow = pose_net(torch.cat([hidden_state_t, x[:, 0]], dim=1))
             for t in range(n_future):
+                # Compute future egomotion
+                if direct_trajectory_prediction:
+                    flow_t = full_flow[:, t]
+                else:
+                    flow_t = pose_net(hidden_state_t)
+
+                flow_t = pose_vec2mat(flow_t)
                 for i in range(self.n_gru_blocks):
                     if i == 0:
-                        # Compute future egomotion
-                        if direct_trajectory_prediction:
-                            flow_t = full_flow[:, t]
-                        else:
-                            flow_t = pose_net(hidden_state_t)
-                        pred_future_egomotions.append(flow_t)
-                        flow_t = pose_vec2mat(flow_t)
-                        # Warp features
-                        hidden_state_previous = self.spatial_grus[i].warp_features(hidden_state_t, flow_t)
-
                         gru_input = x[:, t]
                     else:
-                        if t == 0:
-                            hidden_state_previous = initial_hidden_state
-                        else:
-                            hidden_state_previous = intermediate_states[(t-1, i)]
                         gru_input = hidden_state_next
+                    if t == 0:
+                        hidden_state_previous = initial_hidden_state
+                    else:
+                        hidden_state_previous = intermediate_states[(t-1, i)]
 
+                    # Warp
+                    hidden_state_previous = self.spatial_grus[i].warp_features(hidden_state_previous, flow_t)
 
                     hidden_state_next = self.spatial_grus[i].gru_cell(gru_input, hidden_state_previous)
 
@@ -525,12 +524,6 @@ class FuturePrediction(torch.nn.Module):
 
             output = torch.stack(output, dim=1)
 
-            # Compute pose for last state
-            if not direct_trajectory_prediction:
-                flow_t = pose_net(hidden_state_t)
-                pred_future_egomotions.append(flow_t)
-
-            pred_future_egomotions = torch.stack(pred_future_egomotions, dim=1)
             if direct_trajectory_prediction:
                 pred_future_egomotions = full_flow
 
