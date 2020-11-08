@@ -18,9 +18,9 @@ from .losses import probabilistic_kl_loss
 from .tools import get_batch_iou, compute_miou, get_val_info, mat2pose_vec, pose_vec2mat, compute_egomotion_error
 from .utils import print_model_spec, set_module_grad
 
-BATCH_SIZE = 1
-TAG = 'autoregressive_l2_loss'
-OUTPUT_PATH = './runs/debug'
+BATCH_SIZE = 3
+TAG = 'autoregressive_finetuning'
+OUTPUT_PATH = './runs/probabilistic'
 
 
 PREDICT_FUTURE_EGOMOTION = True
@@ -28,6 +28,10 @@ TEMPORAL_MODEL_NAME = 'gru'
 PROBABILISTIC = True
 AUTOREGRESSIVE_FUTURE_PREDICTION = True
 AUTOREGRESSIVE_L2_LOSS = False
+FINETUNING = True
+PRETRAINED_MODEL_WEIGHTS = '/home/wayve/other_githubs/lift-splat-shoot/runs/probabilistic/session_vm-prod-training' \
+                           '-dgx-03_2020_11_07_18_31_28_autoregressive/model40000.pt'
+#PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
 
 MODEL_NAME = 'temporal'
 RECEPTIVE_FIELD = 3
@@ -51,6 +55,7 @@ MODEL_CONFIG = {'receptive_field': RECEPTIVE_FIELD,
                 'probabilistic': PROBABILISTIC,
                 'autoregressive_future_prediction': AUTOREGRESSIVE_FUTURE_PREDICTION,
                 'autoregressive_l2_loss': AUTOREGRESSIVE_L2_LOSS,
+                'finetuning': FINETUNING,
                 'predict_future_egomotion': PREDICT_FUTURE_EGOMOTION,
                 'temporal_model_name': TEMPORAL_MODEL_NAME,
                 'disable_bev_prediction': DISABLE_BEV_PREDICTION,
@@ -66,7 +71,6 @@ MAP_LABELS = False
 RAND_FLIP = False  # True for basic
 NCAMS = 6  # 5 for basic
 DATAROOT = '/data/cvfs/ah2029/datasets/nuscenes'
-PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
 CROSS_ENTROPY_WEIGHTS = [1.0, 2.13]
 if MAP_LABELS:
     N_CLASSES = 4

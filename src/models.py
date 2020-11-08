@@ -645,6 +645,7 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         self.probabilistic = model_config['probabilistic']
         self.autoregressive_future_prediction = model_config['autoregressive_future_prediction']
         self.autoregressive_l2_loss = model_config['autoregressive_l2_loss']
+        self.finetuning = model_config['finetuning']
         self.predict_future_egomotion = model_config['predict_future_egomotion']  # False
         self.temporal_model_name = model_config['temporal_model_name']  # gru
         self.disable_bev_prediction = model_config['disable_bev_prediction']
@@ -727,6 +728,9 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
 
     def forward(self, imgs, rots, trans, intrins, post_rots, post_trans, future_egomotions, inference=False,
                 noise=None):
+        if self.finetuning:
+            inference = True
+
         output = {}
         b, s, n, c, h, w = imgs.shape
         # Reshape
