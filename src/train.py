@@ -19,7 +19,7 @@ from .tools import get_batch_iou, compute_miou, get_val_info, mat2pose_vec, pose
 from .utils import print_model_spec, set_module_grad
 
 BATCH_SIZE = 3
-TAG = 'direct_traj_warping_everywhere'
+TAG = 'direct_traj_warping_everywhere_res_posenet'
 OUTPUT_PATH = './runs/trajectory'
 
 

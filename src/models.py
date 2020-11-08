@@ -648,6 +648,34 @@ class PoseNet(nn.Module):
         return out
 
 
+class ResPoseNet(nn.Module):
+    def __init__(self, in_channels, n_predictions=1):
+        super().__init__()
+        self.n_predictions = n_predictions
+
+        self.module = nn.Sequential(
+            Bottleneck(in_channels, 64, 7, downsample=True, dropout=0.0),
+            Bottleneck(64, 64, 5, downsample=True, dropout=0.0),
+            Bottleneck(64, 64, 3, downsample=True, dropout=0.0),
+            Bottleneck(64, 128, 3, downsample=True, dropout=0.0),
+            Bottleneck(128, 256, 3, downsample=True, dropout=0.0),
+            Bottleneck(256, 256, 3, downsample=True, dropout=0.0),
+            Bottleneck(256, 256, 3, downsample=True, dropout=0.0),
+            nn.Conv2d(256, 6*n_predictions, 1),
+        )
+
+    def forward(self, x):
+        out = self.module(x)
+        out = out.mean(3).mean(2)
+
+        out = 0.01 * out.view(-1, 6*self.n_predictions)
+
+        if self.n_predictions > 1:
+            out = out.view(-1, self.n_predictions, 6)
+
+        return out
+
+
 class TemporalLiftSplatShoot(LiftSplatShoot):
     def __init__(self, grid_conf, data_aug_conf, outC, model_config):
         super().__init__(grid_conf, data_aug_conf, outC)
@@ -722,7 +750,7 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
             if self.direct_trajectory_prediction:
                 n_predictions += self.n_future
                 pose_in_channels += self.latent_dim
-            self.pose_net = PoseNet(pose_in_channels, n_predictions=n_predictions)
+            self.pose_net = ResPoseNet(pose_in_channels, n_predictions=n_predictions)
 
     def _calculate_future_indices_and_channels(self):
         """ Calculates which indices would be used for the future distribution """
