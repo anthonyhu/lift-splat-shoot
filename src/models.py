@@ -496,7 +496,7 @@ class FuturePrediction(torch.nn.Module):
                     flow_t = full_flow[:, t]
                 else:
                     flow_t = pose_net(hidden_state_t)
-
+                    pred_future_egomotions.append(flow_t)
                 flow_t = pose_vec2mat(flow_t)
                 for i in range(self.n_gru_blocks):
                     if i == 0:
@@ -526,6 +526,10 @@ class FuturePrediction(torch.nn.Module):
 
             if direct_trajectory_prediction:
                 pred_future_egomotions = full_flow
+            else:
+                flow_t = pose_net(hidden_state_t)
+                pred_future_egomotions.append(flow_t)
+                pred_future_egomotions = torch.stack(pred_future_egomotions, dim=1)
 
             return output, pred_future_egomotions
 
