@@ -18,16 +18,16 @@ from .losses import probabilistic_kl_loss
 from .tools import get_batch_iou, compute_miou, get_val_info, mat2pose_vec, pose_vec2mat, compute_egomotion_error
 from .utils import print_model_spec, set_module_grad
 
-BATCH_SIZE = 3
+BATCH_SIZE = 1
 TAG = 'autoregressive_l2_loss'
-OUTPUT_PATH = './runs/probabilistic'
+OUTPUT_PATH = './runs/debug'
 
 
 PREDICT_FUTURE_EGOMOTION = True
 TEMPORAL_MODEL_NAME = 'gru'
 PROBABILISTIC = True
 AUTOREGRESSIVE_FUTURE_PREDICTION = True
-AUTOREGRESSIVE_L2_LOSS = True
+AUTOREGRESSIVE_L2_LOSS = False
 
 MODEL_NAME = 'temporal'
 RECEPTIVE_FIELD = 3
@@ -50,7 +50,7 @@ MODEL_CONFIG = {'receptive_field': RECEPTIVE_FIELD,
                 'latent_dim': 16,
                 'probabilistic': PROBABILISTIC,
                 'autoregressive_future_prediction': AUTOREGRESSIVE_FUTURE_PREDICTION,
-                'autoregresive_l2_loss': AUTOREGRESSIVE_L2_LOSS,
+                'autoregressive_l2_loss': AUTOREGRESSIVE_L2_LOSS,
                 'predict_future_egomotion': PREDICT_FUTURE_EGOMOTION,
                 'temporal_model_name': TEMPORAL_MODEL_NAME,
                 'disable_bev_prediction': DISABLE_BEV_PREDICTION,

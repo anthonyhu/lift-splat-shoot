@@ -565,6 +565,50 @@ class FuturePredictionAutoregressive(torch.nn.Module):
                 z = z.view(b, n_future, c, h, w)
 
             return z, None
+        else:
+            # Use predicted future ego-motion to warp features in a recursive manner
+            output = []
+            pred_future_egomotions = []
+            intermediate_states = {}
+            n_future = z.shape[1]
+
+            latent_vector = self.conv_match_channel_hidden_state(hidden_state)
+
+            # This is our Markovian state
+            z_t = z[:, 0]
+            for t in range(n_future):
+                for i in range(self.n_gru_blocks):
+                    if i == 0:
+                        # Compute future egomotion
+                        flow_t = pose_net(z_t)
+                        pred_future_egomotions.append(flow_t)
+                        flow_t = pose_vec2mat(flow_t)
+                        # Warp features
+                        gru_input = self.spatial_grus[i].warp_features(z_t, flow_t)
+                    else:
+                        gru_input = z_t
+
+                    if t == 0:
+                        previous_hidden_state = latent_vector
+                    else:
+                        previous_hidden_state = intermediate_states[(t-1, i)]
+
+                    z_t = self.spatial_grus[i].gru_cell(gru_input, previous_hidden_state)
+                    intermediate_states[(t, i)] = z_t
+
+                    z_t = self.res_blocks[i](z_t)
+
+                # New markovian state at the end of all the gru forwards
+                output.append(z_t)
+
+            # Compute pose for last state
+            flow_t = pose_net(z_t)
+            pred_future_egomotions.append(flow_t)
+
+            output = torch.stack(output, dim=1)
+            pred_future_egomotions = torch.stack(pred_future_egomotions, dim=1)
+
+            return output, pred_future_egomotions
 
 
 class PoseNet(nn.Module):
@@ -600,7 +644,7 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         self.latent_dim = model_config['latent_dim']  # 16
         self.probabilistic = model_config['probabilistic']
         self.autoregressive_future_prediction = model_config['autoregressive_future_prediction']
-        self.autoregressive_l2_loss = model_config['autoregresive_l2_loss']
+        self.autoregressive_l2_loss = model_config['autoregressive_l2_loss']
         self.predict_future_egomotion = model_config['predict_future_egomotion']  # False
         self.temporal_model_name = model_config['temporal_model_name']  # gru
         self.disable_bev_prediction = model_config['disable_bev_prediction']

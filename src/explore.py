@@ -18,7 +18,9 @@ from .tools import (ego_to_cam, get_only_in_img_mask, denormalize_img,
 from .models import compile_model
 
 from .train import N_CLASSES, DATAROOT, PRETRAINED_MODEL_WEIGHTS, MODEL_NAME, SEQUENCE_LENGTH, MAP_LABELS, \
-    PREDICT_FUTURE_EGOMOTION, DISABLE_BEV_PREDICTION, RECEPTIVE_FIELD, N_FUTURE, MODEL_CONFIG, CROSS_ENTROPY_WEIGHTS
+    PREDICT_FUTURE_EGOMOTION, DISABLE_BEV_PREDICTION, RECEPTIVE_FIELD, N_FUTURE, MODEL_CONFIG, CROSS_ENTROPY_WEIGHTS, \
+    LOSS_WEIGHTS
+from .losses import probabilistic_kl_loss
 
 
 def lidar_check(version,
@@ -125,7 +127,7 @@ def lidar_check(version,
 
 
 def eval_model_iou(version,
-                   model_weights=PRETRAINED_MODEL_WEIGHTS,
+                   model_weights='',
                    dataroot=DATAROOT,
 
                    H=900, W=1600,
@@ -182,16 +184,21 @@ def eval_model_iou(version,
     model.load_state_dict(torch.load(model_weights))
     model.to(device)
 
-    loss_fn = torch.nn.CrossEntropyLoss(weight=torch.Tensor(CROSS_ENTROPY_WEIGHTS)).to(device)
+    losses_fn = {}
+    losses_fn['dynamic_agents'] = torch.nn.CrossEntropyLoss(weight=torch.Tensor(CROSS_ENTROPY_WEIGHTS)).to(device)
 
     if PREDICT_FUTURE_EGOMOTION:
-        egomotion_loss_fn = torch.nn.MSELoss()
-    else:
-        egomotion_loss_fn = None
+        losses_fn['future_egomotion'] = torch.nn.MSELoss()
+
+    if model.probabilistic:
+        losses_fn['kl'] = probabilistic_kl_loss
+
+    if model.autoregressive_l2_loss:
+        losses_fn['autoregressive'] = torch.nn.MSELoss()
 
     model.eval()
-    val_info = get_val_info(model, valloader, loss_fn, device, is_temporal=(MODEL_NAME == 'temporal'),
-                            n_classes=N_CLASSES, egomotion_loss_fn=egomotion_loss_fn)
+    val_info = get_val_info(model, valloader, losses_fn, device, is_temporal=(MODEL_NAME == 'temporal'),
+                            n_classes=N_CLASSES, loss_weights=LOSS_WEIGHTS)
     print(val_info)
 
 
