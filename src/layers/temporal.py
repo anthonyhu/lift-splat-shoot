@@ -24,7 +24,7 @@ class SpatialGRU(nn.Module):
         self.conv_state_tilde = ConvBlock(input_size + hidden_size, hidden_size, kernel_size=3, bias=False,
                                           norm=norm, activation=activation)
 
-    def forward(self, x, state=None, flow=None):
+    def forward(self, x, state=None, flow=None, mode='bilinear'):
         # pylint: disable=unused-argument, arguments-differ
         # Check size
         assert len(x.size()) == 5, 'Input tensor must be BxTxCxHxW.'
@@ -38,9 +38,9 @@ class SpatialGRU(nn.Module):
             x_t = x[:, t]
             if flow is not None:
                 if not self.autoregressive:
-                    rnn_state = self.warp_features(rnn_state, flow[:, t])
+                    rnn_state = self.warp_features(rnn_state, flow[:, t], mode=mode)
                 else:
-                    x_t = self.warp_features(x_t, flow[:, t])
+                    x_t = self.warp_features(x_t, flow[:, t], mode=mode)
 
             # propagate rnn state
             rnn_state = self.gru_cell(x_t, rnn_state)
@@ -50,7 +50,7 @@ class SpatialGRU(nn.Module):
         return torch.stack(rnn_output, dim=1)
 
     @staticmethod
-    def warp_features(state, flow):
+    def warp_features(state, flow, mode='bilinear'):
         b, c, h, w = state.shape
         angle = torch.atan2(flow[:, 1, 0], flow[:, 0, 0])
         translation = flow[:, :2, 3]
@@ -68,7 +68,7 @@ class SpatialGRU(nn.Module):
                                       sin_theta, cos_theta, translation[:, 0]], dim=-1).view(b, 2, 3)
 
         grid = torch.nn.functional.affine_grid(transformation, size=state.shape, align_corners=False)
-        warped_state = torch.nn.functional.grid_sample(state, grid, mode='nearest', padding_mode='zeros',
+        warped_state = torch.nn.functional.grid_sample(state, grid, mode=mode, padding_mode='zeros',
                                                        align_corners=False)
 
         return warped_state

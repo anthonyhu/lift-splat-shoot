@@ -18,20 +18,19 @@ from .losses import probabilistic_kl_loss
 from .tools import get_batch_iou, compute_miou, get_val_info, mat2pose_vec, pose_vec2mat, compute_egomotion_error
 from .utils import print_model_spec, set_module_grad
 
-BATCH_SIZE = 3
-TAG = 'autoregressive_finetuning'
+BATCH_SIZE = 2
+TAG = 'autoregressive_tempblock_warmstart=5000'
 OUTPUT_PATH = './runs/probabilistic'
 
 
 PREDICT_FUTURE_EGOMOTION = True
-TEMPORAL_MODEL_NAME = 'gru'
-PROBABILISTIC = True
 AUTOREGRESSIVE_FUTURE_PREDICTION = True
 AUTOREGRESSIVE_L2_LOSS = False
-FINETUNING = True
-PRETRAINED_MODEL_WEIGHTS = '/home/wayve/other_githubs/lift-splat-shoot/runs/probabilistic/session_vm-prod-training' \
-                           '-dgx-03_2020_11_07_18_31_28_autoregressive/model40000.pt'
-#PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
+WARMSTART_STEPS = 5000
+FINETUNING = False
+# PRETRAINED_MODEL_WEIGHTS = '/home/wayve/other_githubs/lift-splat-shoot/runs/probabilistic/session_vm-prod-training' \
+#                            '-dgx-03_2020_11_07_18_31_28_autoregressive/model40000.pt'
+PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
 
 MODEL_NAME = 'temporal'
 RECEPTIVE_FIELD = 3
@@ -43,11 +42,13 @@ LOSS_WEIGHTS = {'dynamic_agents': 1.0,
                 'kl': 0.01,
                 'autoregressive': 0.1,
                 }
-#
-# if 'direwolf' in socket.gethostname():
-#     RECEPTIVE_FIELD = 2
-#     N_FUTURE = 2
 
+if 'direwolf' in socket.gethostname():
+    RECEPTIVE_FIELD = 2
+    N_FUTURE = 2
+
+PROBABILISTIC = True
+TEMPORAL_MODEL_NAME = 'temporal_block'
 DISABLE_BEV_PREDICTION = False
 MODEL_CONFIG = {'receptive_field': RECEPTIVE_FIELD,
                 'n_future': N_FUTURE,
@@ -108,6 +109,7 @@ def train(version,
     print(MODEL_CONFIG)
     print(LOSS_WEIGHTS)
     print(f'Number of classes: {N_CLASSES}')
+    print(f'Warm start for {WARMSTART_STEPS} steps')
     print(f'Session: {logdir}')
 
     if 'vm' in socket.gethostname():
@@ -200,6 +202,8 @@ def train(version,
 
             t0 = time()
             opt.zero_grad()
+
+            finished_warmstart = counter > WARMSTART_STEPS
             out = model(imgs.to(device),
                           rots.to(device),
                           trans.to(device),
@@ -207,6 +211,7 @@ def train(version,
                           post_rots.to(device),
                           post_trans.to(device),
                           future_egomotions.to(device),
+                          inference=finished_warmstart,
                           )
 
             if not DISABLE_BEV_PREDICTION:
