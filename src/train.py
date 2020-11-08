@@ -18,16 +18,16 @@ from .losses import probabilistic_kl_loss
 from .tools import get_batch_iou, compute_miou, get_val_info, mat2pose_vec, pose_vec2mat, compute_egomotion_error
 from .utils import print_model_spec, set_module_grad
 
-BATCH_SIZE = 3
+BATCH_SIZE = 1
 TAG = 'warping_everywhere_res_posenet_single_step_pose'
-OUTPUT_PATH = './runs/trajectory'
+OUTPUT_PATH = './runs/debug'
 
 
 PREDICT_FUTURE_EGOMOTION = True
 AUTOREGRESSIVE_FUTURE_PREDICTION = False
 AUTOREGRESSIVE_L2_LOSS = False
 WARMSTART_STEPS = 10000
-DIRECT_TRAJECTORY_PREDICTION = False
+DIRECT_TRAJECTORY_PREDICTION = True
 FINETUNING = False
 # PRETRAINED_MODEL_WEIGHTS = '/home/wayve/other_githubs/lift-splat-shoot/runs/probabilistic/session_vm-prod-training' \
 #                            '-dgx-03_2020_11_07_18_31_28_autoregressive/model40000.pt'
