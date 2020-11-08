@@ -18,21 +18,23 @@ from .losses import probabilistic_kl_loss
 from .tools import get_batch_iou, compute_miou, get_val_info, mat2pose_vec, pose_vec2mat, compute_egomotion_error
 from .utils import print_model_spec, set_module_grad
 
-BATCH_SIZE = 2
-TAG = 'autoregressive_tempblock_warmstart=5000'
-OUTPUT_PATH = './runs/probabilistic'
+BATCH_SIZE = 3
+TAG = 'direct_traj'
+OUTPUT_PATH = './runs/trajectory'
 
 
 PREDICT_FUTURE_EGOMOTION = True
-AUTOREGRESSIVE_FUTURE_PREDICTION = True
+AUTOREGRESSIVE_FUTURE_PREDICTION = False
 AUTOREGRESSIVE_L2_LOSS = False
-WARMSTART_STEPS = 5000
+WARMSTART_STEPS = 10000
+DIRECT_TRAJECTORY_PREDICTION = True
 FINETUNING = False
 # PRETRAINED_MODEL_WEIGHTS = '/home/wayve/other_githubs/lift-splat-shoot/runs/probabilistic/session_vm-prod-training' \
 #                            '-dgx-03_2020_11_07_18_31_28_autoregressive/model40000.pt'
 PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
 
-MODEL_NAME = 'temporal'
+
+TEMPORAL_MODEL_NAME = 'gru'
 RECEPTIVE_FIELD = 3
 N_FUTURE = 3
 
@@ -43,12 +45,12 @@ LOSS_WEIGHTS = {'dynamic_agents': 1.0,
                 'autoregressive': 0.1,
                 }
 
-if 'direwolf' in socket.gethostname():
-    RECEPTIVE_FIELD = 2
-    N_FUTURE = 2
+# if 'direwolf' in socket.gethostname():
+#     RECEPTIVE_FIELD = 2
+#     N_FUTURE = 2
 
+MODEL_NAME = 'temporal'
 PROBABILISTIC = True
-TEMPORAL_MODEL_NAME = 'temporal_block'
 DISABLE_BEV_PREDICTION = False
 MODEL_CONFIG = {'receptive_field': RECEPTIVE_FIELD,
                 'n_future': N_FUTURE,
@@ -56,6 +58,7 @@ MODEL_CONFIG = {'receptive_field': RECEPTIVE_FIELD,
                 'probabilistic': PROBABILISTIC,
                 'autoregressive_future_prediction': AUTOREGRESSIVE_FUTURE_PREDICTION,
                 'autoregressive_l2_loss': AUTOREGRESSIVE_L2_LOSS,
+                'direct_trajectory_prediction': DIRECT_TRAJECTORY_PREDICTION,
                 'finetuning': FINETUNING,
                 'predict_future_egomotion': PREDICT_FUTURE_EGOMOTION,
                 'temporal_model_name': TEMPORAL_MODEL_NAME,

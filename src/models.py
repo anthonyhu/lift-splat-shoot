@@ -455,7 +455,8 @@ class FuturePrediction(torch.nn.Module):
         self.spatial_grus = torch.nn.ModuleList(self.spatial_grus)
         self.res_blocks = torch.nn.ModuleList(self.res_blocks)
 
-    def forward(self, x, hidden_state, future_egomotions, inference=False, pose_net=None):
+    def forward(self, x, hidden_state, future_egomotions, inference=False, pose_net=None,
+                direct_trajectory_prediction=False):
         # pylint: disable=arguments-differ
         # x has shape (b, n_future, c, h, w), hidden_state (b, c, h, w)
         if not inference:
@@ -486,15 +487,21 @@ class FuturePrediction(torch.nn.Module):
             # This is our Markovian state
             hidden_state_t = initial_hidden_state
 
+            if direct_trajectory_prediction:
+                # z_t + sample
+                full_flow = pose_net(torch.cat([hidden_state_t, x[:, 0]], dim=1))
             for t in range(n_future):
                 for i in range(self.n_gru_blocks):
                     if i == 0:
                         # Compute future egomotion
-                        flow_t = pose_net(hidden_state_t)
+                        if direct_trajectory_prediction:
+                            flow_t = full_flow[:, t]
+                        else:
+                            flow_t = pose_net(hidden_state_t)
+                        pred_future_egomotions.append(flow_t)
                         flow_t = pose_vec2mat(flow_t)
                         # Warp features
                         hidden_state_previous = self.spatial_grus[i].warp_features(hidden_state_t, flow_t)
-                        pred_future_egomotions.append(flow_t)
 
                         gru_input = x[:, t]
                     else:
@@ -517,7 +524,15 @@ class FuturePrediction(torch.nn.Module):
                 output.append(hidden_state_t)
 
             output = torch.stack(output, dim=1)
+
+            # Compute pose for last state
+            if not direct_trajectory_prediction:
+                flow_t = pose_net(hidden_state_t)
+                pred_future_egomotions.append(flow_t)
+
             pred_future_egomotions = torch.stack(pred_future_egomotions, dim=1)
+            if direct_trajectory_prediction:
+                pred_future_egomotions = full_flow
 
             return output, pred_future_egomotions
 
@@ -546,7 +561,8 @@ class FuturePredictionAutoregressive(torch.nn.Module):
         self.spatial_grus = torch.nn.ModuleList(self.spatial_grus)
         self.res_blocks = torch.nn.ModuleList(self.res_blocks)
 
-    def forward(self, z, hidden_state, future_egomotions, inference=False, pose_net=None):
+    def forward(self, z, hidden_state, future_egomotions, inference=False, pose_net=None,
+                direct_trajectory_prediction=False):
         # pylint: disable=arguments-differ
         # z has shape (b, n_future, c, h, w), hidden_state (b, c, h, w) and is the sample from the distribution
         if not inference:
@@ -612,8 +628,9 @@ class FuturePredictionAutoregressive(torch.nn.Module):
 
 
 class PoseNet(nn.Module):
-    def __init__(self, in_channels):
+    def __init__(self, in_channels, n_predictions=1):
         super().__init__()
+        self.n_predictions = n_predictions
 
         self.module = nn.Sequential(
             ConvBlock(in_channels, 64, 7, 2),
@@ -623,14 +640,17 @@ class PoseNet(nn.Module):
             ConvBlock(128, 256, 3, 2),
             ConvBlock(256, 256, 3, 2),
             ConvBlock(256, 256, 3, 2),
-            nn.Conv2d(256, 6, 1),
+            nn.Conv2d(256, 6*n_predictions, 1),
         )
 
     def forward(self, x):
         out = self.module(x)
         out = out.mean(3).mean(2)
 
-        out = 0.01 * out.view(-1, 6)
+        out = 0.01 * out.view(-1, 6*self.n_predictions)
+
+        if self.n_predictions > 1:
+            out = out.view(-1, self.n_predictions, 6)
 
         return out
 
@@ -645,6 +665,7 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         self.probabilistic = model_config['probabilistic']
         self.autoregressive_future_prediction = model_config['autoregressive_future_prediction']
         self.autoregressive_l2_loss = model_config['autoregressive_l2_loss']
+        self.direct_trajectory_prediction = model_config['direct_trajectory_prediction']
         self.finetuning = model_config['finetuning']
         self.predict_future_egomotion = model_config['predict_future_egomotion']  # False
         self.temporal_model_name = model_config['temporal_model_name']  # gru
@@ -703,7 +724,12 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
             self.bevencode = BevEncode(inC=self.future_pred_in_channels, outC=outC)
 
         if self.predict_future_egomotion:
-            self.pose_net = PoseNet(self.future_pred_in_channels)
+            n_predictions = 1
+            pose_in_channels = self.future_pred_in_channels
+            if self.direct_trajectory_prediction:
+                n_predictions += self.n_future
+                pose_in_channels += self.latent_dim
+            self.pose_net = PoseNet(pose_in_channels, n_predictions=n_predictions)
 
     def _calculate_future_indices_and_channels(self):
         """ Calculates which indices would be used for the future distribution """
@@ -779,7 +805,7 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
 
         z_future, pred_future_egomotions = self.future_prediction(
             future_prediction_input, hidden_state, future_egomotions[:, (self.receptive_field - 1):-1],
-            inference=inference, pose_net=self.pose_net,
+            inference=inference, pose_net=self.pose_net, direct_trajectory_prediction=self.direct_trajectory_prediction,
         )
 
         output['z_future_pred'] = z_future
@@ -798,8 +824,12 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
             output['bev'] = bev_output
 
         if self.predict_future_egomotion and not inference:
-            pred_future_egomotions = self.pose_net(z_future)
-            pred_future_egomotions = self.unpack_sequence_dim(pred_future_egomotions, b, new_s)
+            if self.direct_trajectory_prediction:
+                pose_net_input = torch.cat([present_features, sample], dim=-3)
+                pred_future_egomotions = self.pose_net(pose_net_input[:, 0])
+            else:
+                pred_future_egomotions = self.pose_net(z_future)
+                pred_future_egomotions = self.unpack_sequence_dim(pred_future_egomotions, b, new_s)
 
         output['future_egomotions'] = pred_future_egomotions
 
