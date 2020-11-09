@@ -19,12 +19,12 @@ from .tools import get_batch_iou, compute_miou, get_val_info, pose_vec2mat, comp
     compute_egomotion_error_plane
 from .utils import print_model_spec, set_module_grad
 
-BATCH_SIZE = 1
-TAG = '3_dof'
+BATCH_SIZE = 3
+TAG = 'no_egomotion_inference_mode'
 OUTPUT_PATH = './runs/3_dof'
 
 
-PREDICT_FUTURE_EGOMOTION = True
+PREDICT_FUTURE_EGOMOTION = False
 AUTOREGRESSIVE_FUTURE_PREDICTION = False
 AUTOREGRESSIVE_L2_LOSS = False
 WARMSTART_STEPS = 10000

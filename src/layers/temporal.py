@@ -51,6 +51,8 @@ class SpatialGRU(nn.Module):
 
     @staticmethod
     def warp_features(state, flow, mode='bilinear'):
+        if flow is None:
+            return state
         b, c, h, w = state.shape
         # z-rotation
         angle = flow[:, 5]  # torch.atan2(flow[:, 1, 0], flow[:, 0, 0])

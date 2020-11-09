@@ -492,11 +492,14 @@ class FuturePrediction(torch.nn.Module):
                 full_flow = pose_net(torch.cat([hidden_state_t, x[:, 0]], dim=1))
             for t in range(n_future):
                 # Compute future egomotion
-                if direct_trajectory_prediction:
-                    flow_t = full_flow[:, t]
+                if self.predict_future_egomotion:
+                    if direct_trajectory_prediction:
+                        flow_t = full_flow[:, t]
+                    else:
+                        flow_t = pose_net(hidden_state_t)
+                        pred_future_egomotions.append(flow_t)
                 else:
-                    flow_t = pose_net(hidden_state_t)
-                    pred_future_egomotions.append(flow_t)
+                    flow_t = None
                 for i in range(self.n_gru_blocks):
                     if i == 0:
                         gru_input = x[:, t]
@@ -523,18 +526,21 @@ class FuturePrediction(torch.nn.Module):
 
             output = torch.stack(output, dim=1)
 
-            if direct_trajectory_prediction:
-                pred_future_egomotions = full_flow
+            if self.predict_future_egomotion:
+                if direct_trajectory_prediction:
+                    pred_future_egomotions = full_flow
+                else:
+                    flow_t = pose_net(hidden_state_t)
+                    pred_future_egomotions.append(flow_t)
+                    pred_future_egomotions = torch.stack(pred_future_egomotions, dim=1)
             else:
-                flow_t = pose_net(hidden_state_t)
-                pred_future_egomotions.append(flow_t)
-                pred_future_egomotions = torch.stack(pred_future_egomotions, dim=1)
+                pred_future_egomotions = None
 
             return output, pred_future_egomotions
 
 
 class FuturePredictionAutoregressive(torch.nn.Module):
-    def __init__(self, in_channels, latent_dim, predict_future_egomotion=False, n_gru_blocks=3, n_res_layers=3):
+    def __init__(self, in_channels, latent_dim, predict_future_egomotion=True, n_gru_blocks=3, n_res_layers=3):
         super().__init__()
         self.predict_future_egomotion = predict_future_egomotion
         self.n_gru_blocks = n_gru_blocks
