@@ -274,7 +274,7 @@ def get_val_info(model, valloader, losses_fn, device, use_tqdm=True, is_temporal
 
             out = model(allimgs.to(device), rots.to(device),
                           trans.to(device), intrins.to(device), post_rots.to(device),
-                          post_trans.to(device), future_egomotions.to(device), inference=True)
+                          post_trans.to(device), future_egomotions.to(device), inference=False)
 
             if not model.disable_bev_prediction:
                 preds = out['bev']

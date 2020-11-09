@@ -20,19 +20,18 @@ from .tools import get_batch_iou, compute_miou, get_val_info, pose_vec2mat, comp
 from .utils import print_model_spec, set_module_grad
 
 BATCH_SIZE = 3
-TAG = 'no_egomotion_inference_mode'
+TAG = 'no_egomotion_NO_inference'
 OUTPUT_PATH = './runs/3_dof'
 
 
 PREDICT_FUTURE_EGOMOTION = False
-AUTOREGRESSIVE_FUTURE_PREDICTION = False
-AUTOREGRESSIVE_L2_LOSS = False
-WARMSTART_STEPS = 10000
+WARMSTART_STEPS = 10000000
 VAL_STEPS = 10000
 THREE_DOF_EGOMOTION = True
 DIRECT_TRAJECTORY_PREDICTION = False
 PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
-
+AUTOREGRESSIVE_FUTURE_PREDICTION = False
+AUTOREGRESSIVE_L2_LOSS = False
 
 TEMPORAL_MODEL_NAME = 'gru'
 RECEPTIVE_FIELD = 3
