@@ -20,7 +20,7 @@ from .tools import get_batch_iou, compute_miou, get_val_info, pose_vec2mat, comp
 from .utils import print_model_spec, set_module_grad
 
 BATCH_SIZE = 3
-TAG = 'single_step_ego_weight=1'
+TAG = 'autoregressive'
 OUTPUT_PATH = './runs/3_dof'
 
 
@@ -30,8 +30,7 @@ VAL_STEPS = 10000
 THREE_DOF_EGOMOTION = True
 DIRECT_TRAJECTORY_PREDICTION = False
 PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
-AUTOREGRESSIVE_FUTURE_PREDICTION = False
-AUTOREGRESSIVE_L2_LOSS = False
+AUTOREGRESSIVE_FUTURE_PREDICTION = True
 
 TEMPORAL_MODEL_NAME = 'gru'
 RECEPTIVE_FIELD = 3
@@ -39,7 +38,7 @@ N_FUTURE = 3
 
 LOSS_WEIGHTS = {'dynamic_agents': 1.0,
                 'static_agents': 0.5,
-                'future_egomotion': 1.0,
+                'future_egomotion': 0.1,
                 'kl': 0.01,
                 'autoregressive': 0.1,
                 }
@@ -51,6 +50,7 @@ LOSS_WEIGHTS = {'dynamic_agents': 1.0,
 MODEL_NAME = 'temporal'
 PROBABILISTIC = True
 DISABLE_BEV_PREDICTION = False
+AUTOREGRESSIVE_L2_LOSS = False
 MODEL_CONFIG = {'receptive_field': RECEPTIVE_FIELD,
                 'n_future': N_FUTURE,
                 'latent_dim': 16,
