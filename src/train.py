@@ -19,9 +19,9 @@ from .tools import get_batch_iou, compute_miou, get_val_info, pose_vec2mat, comp
     compute_egomotion_error_plane
 from .utils import print_model_spec, set_module_grad
 
-BATCH_SIZE = 3
-TAG = 'autoregressive'
-OUTPUT_PATH = './runs/3_dof'
+BATCH_SIZE = 1
+TAG = 'default'
+OUTPUT_PATH = './runs/debug'
 
 
 PREDICT_FUTURE_EGOMOTION = True
@@ -30,7 +30,7 @@ VAL_STEPS = 10000
 THREE_DOF_EGOMOTION = True
 DIRECT_TRAJECTORY_PREDICTION = False
 PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
-AUTOREGRESSIVE_FUTURE_PREDICTION = True
+AUTOREGRESSIVE_FUTURE_PREDICTION = False
 
 TEMPORAL_MODEL_NAME = 'gru'
 RECEPTIVE_FIELD = 3
