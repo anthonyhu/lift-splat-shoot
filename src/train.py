@@ -15,7 +15,8 @@ import os
 from .models import compile_model
 from .data import compile_data
 from .losses import probabilistic_kl_loss
-from .tools import get_batch_iou, compute_miou, get_val_info, pose_vec2mat, compute_egomotion_error
+from .tools import get_batch_iou, compute_miou, get_val_info, pose_vec2mat, compute_egomotion_error, \
+    compute_egomotion_error_plane
 from .utils import print_model_spec, set_module_grad
 
 BATCH_SIZE = 1
@@ -285,13 +286,18 @@ def train(version,
                     print(f'train vehicle iou: {vehicles_iou}')
 
                 if PREDICT_FUTURE_EGOMOTION:
-                    # Convert predicted 6 DoF egomotion to pose matrix
-                    predicted_pose_matrices = pose_vec2mat(out['future_egomotions'])
-                    gt_pose_matrices = pose_vec2mat(future_egomotions)
+                    if model.three_dof_egomotion:
+                        positional_error, angular_error = compute_egomotion_error_plane(
+                            out['future_egomotions'].detach().cpu().numpy(), future_egomotions.cpu().numpy()
+                        )
+                    else:
+                        # Convert predicted 6 DoF egomotion to pose matrix
+                        predicted_pose_matrices = pose_vec2mat(out['future_egomotions'])
+                        gt_pose_matrices = pose_vec2mat(future_egomotions)
 
-                    positional_error, angular_error = compute_egomotion_error(
-                        predicted_pose_matrices.detach().cpu().numpy(), gt_pose_matrices.cpu().numpy()
-                    )
+                        positional_error, angular_error = compute_egomotion_error(
+                            predicted_pose_matrices.detach().cpu().numpy(), gt_pose_matrices.cpu().numpy()
+                        )
                     writer.add_scalar('train/positional_error', positional_error, counter)
                     writer.add_scalar('train/angular_error', angular_error, counter)
                     print(f'train positional_error (in m): {positional_error}')

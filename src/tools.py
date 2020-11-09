@@ -346,13 +346,19 @@ def get_val_info(model, valloader, losses_fn, device, use_tqdm=True, is_temporal
                 total_vehicles_iou += vehicles_iou['vehicles']
 
             if model.predict_future_egomotion:
-                # Convert predicted 6 DoF egomotion to pose matrix
-                predicted_pose_matrices = pose_vec2mat(out['future_egomotions'])
-                gt_pose_matrices = pose_vec2mat(future_egomotions)
+                if model.three_dof_egomotion:
+                    positional_error, angular_error = compute_egomotion_error_plane(
+                        out['future_egomotions'].detach().cpu().numpy(), future_egomotions.cpu().numpy()
+                    )
+                else:
+                    # Convert predicted 6 DoF egomotion to pose matrix
+                    predicted_pose_matrices = pose_vec2mat(out['future_egomotions'])
+                    gt_pose_matrices = pose_vec2mat(future_egomotions)
 
-                positional_error, angular_error = compute_egomotion_error(
-                    predicted_pose_matrices.detach().cpu().numpy(), gt_pose_matrices.cpu().numpy()
-                )
+                    positional_error, angular_error = compute_egomotion_error(
+                        predicted_pose_matrices.detach().cpu().numpy(), gt_pose_matrices.cpu().numpy()
+                    )
+
                 total_positional_error += positional_error
                 total_angular_error += angular_error
 
@@ -626,6 +632,30 @@ def compute_egomotion_error(pred, gt):
     # Dot product between the 3D vectors
     dot_product = np.sum(pred_rotation_vector * gt_rotation_vector, axis=-1)
     angular_error = np.arccos(dot_product) * 180 / np.pi
+
+    if np.any(np.isnan(angular_error)):
+        print('nan values in angular error')
+    angular_error = angular_error[~np.isnan(angular_error)].mean()
+
+    return positional_error, angular_error
+
+
+def compute_egomotion_error_plane(pred, gt):
+    # Positional and rotational error in 3DoF
+    """
+    Parameters
+    ----------
+        pred: np.ndarray (B, S, 6)
+        gt: np.ndarray (B, S, 6)
+    """
+    # Positional error x-y translation
+    pred_translation = pred[..., :2]
+    gt_translation = gt[..., :2]
+    positional_error = np.linalg.norm(pred_translation - gt_translation, ord=2, axis=-1)
+    positional_error = positional_error.mean()
+
+    # Angular error z-axis
+    angular_error = np.abs(pred[..., 5] - gt[..., 5]) * 180 / np.pi
 
     if np.any(np.isnan(angular_error)):
         print('nan values in angular error')
