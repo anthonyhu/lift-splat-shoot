@@ -20,7 +20,7 @@ from nuscenes.utils.data_classes import Box
 from glob import glob
 
 from .tools import get_lidar_data, img_transform, normalize_img, gen_dx_bx, get_nusc_maps, get_local_map, \
-    convert_egopose_to_matrix
+    convert_egopose_to_matrix, mat2pose_vec
 from .utils import convert_figure_numpy
 from .constants import DRIVEABLE_AREA_ID, LINE_MARKINGS_ID
 
@@ -329,7 +329,11 @@ class NuscData(torch.utils.data.Dataset):
                 future_egomotion[3, :3] = 0.0
                 future_egomotion[3, 3] = 1.0
 
-        return torch.Tensor(future_egomotion).float()
+        future_egomotion = torch.Tensor(future_egomotion).float()
+
+        # Convert to 6DoF vector
+        future_egomotion = mat2pose_vec(future_egomotion)
+        return future_egomotion
 
     def choose_cams(self):
         if self.is_train and self.data_aug_conf['Ncams'] < len(self.data_aug_conf['cams']):

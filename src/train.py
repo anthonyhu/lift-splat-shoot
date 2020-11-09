@@ -15,22 +15,21 @@ import os
 from .models import compile_model
 from .data import compile_data
 from .losses import probabilistic_kl_loss
-from .tools import get_batch_iou, compute_miou, get_val_info, mat2pose_vec, pose_vec2mat, compute_egomotion_error
+from .tools import get_batch_iou, compute_miou, get_val_info, pose_vec2mat, compute_egomotion_error
 from .utils import print_model_spec, set_module_grad
 
 BATCH_SIZE = 1
-TAG = 'warping_everywhere_res_posenet_single_step_pose'
-OUTPUT_PATH = './runs/debug'
+TAG = '3_dof'
+OUTPUT_PATH = './runs/3_dof'
 
 
 PREDICT_FUTURE_EGOMOTION = True
 AUTOREGRESSIVE_FUTURE_PREDICTION = False
 AUTOREGRESSIVE_L2_LOSS = False
 WARMSTART_STEPS = 10000
-DIRECT_TRAJECTORY_PREDICTION = True
-FINETUNING = False
-# PRETRAINED_MODEL_WEIGHTS = '/home/wayve/other_githubs/lift-splat-shoot/runs/probabilistic/session_vm-prod-training' \
-#                            '-dgx-03_2020_11_07_18_31_28_autoregressive/model40000.pt'
+VAL_STEPS = 10000
+THREE_DOF_EGOMOTION = True
+DIRECT_TRAJECTORY_PREDICTION = False
 PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
 
 
@@ -59,8 +58,8 @@ MODEL_CONFIG = {'receptive_field': RECEPTIVE_FIELD,
                 'autoregressive_future_prediction': AUTOREGRESSIVE_FUTURE_PREDICTION,
                 'autoregressive_l2_loss': AUTOREGRESSIVE_L2_LOSS,
                 'direct_trajectory_prediction': DIRECT_TRAJECTORY_PREDICTION,
-                'finetuning': FINETUNING,
                 'predict_future_egomotion': PREDICT_FUTURE_EGOMOTION,
+                'three_dof_egomotion': THREE_DOF_EGOMOTION,
                 'temporal_model_name': TEMPORAL_MODEL_NAME,
                 'disable_bev_prediction': DISABLE_BEV_PREDICTION,
                 'start_out_channels': 80,
@@ -192,7 +191,7 @@ def train(version,
         losses_fn['autoregressive'] = torch.nn.MSELoss()
 
     writer = SummaryWriter(logdir=logdir)
-    val_step = 10 if version == 'mini' else 10000
+    val_step = 10 if version == 'mini' else VAL_STEPS
     train_eval_step = 10 if version == 'mini' else 100
 
     model.train()
@@ -233,15 +232,18 @@ def train(version,
                     future_egomotions = future_egomotions.to(device)
                     future_egomotions = future_egomotions[:, (model.receptive_field - 1):].contiguous()
 
-                    future_egomotions_vec = mat2pose_vec(future_egomotions)
-
             losses = {}
             if not DISABLE_BEV_PREDICTION:
                 losses['dynamic_agents'] = losses_fn['dynamic_agents'](preds, binimgs)
 
             if PREDICT_FUTURE_EGOMOTION:
-                losses['future_egomotion'] = losses_fn['future_egomotion'](out['future_egomotions'],
-                                                                           future_egomotions_vec)
+                if model.three_dof_egomotion:
+                    # x-y translation and z-axis rotation
+                    pose_slice = [0, 1, 5]
+                else:
+                    pose_slice = list(range(6))
+                losses['future_egomotion'] = losses_fn['future_egomotion'](out['future_egomotions'][:, :, pose_slice],
+                                                                           future_egomotions[:, :, pose_slice])
 
             if PROBABILISTIC:
                 losses['kl'] = losses_fn['kl'](out)
@@ -285,9 +287,10 @@ def train(version,
                 if PREDICT_FUTURE_EGOMOTION:
                     # Convert predicted 6 DoF egomotion to pose matrix
                     predicted_pose_matrices = pose_vec2mat(out['future_egomotions'])
+                    gt_pose_matrices = pose_vec2mat(future_egomotions)
 
                     positional_error, angular_error = compute_egomotion_error(
-                        predicted_pose_matrices.detach().cpu().numpy(), future_egomotions.cpu().numpy()
+                        predicted_pose_matrices.detach().cpu().numpy(), gt_pose_matrices.cpu().numpy()
                     )
                     writer.add_scalar('train/positional_error', positional_error, counter)
                     writer.add_scalar('train/angular_error', angular_error, counter)

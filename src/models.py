@@ -497,7 +497,6 @@ class FuturePrediction(torch.nn.Module):
                 else:
                     flow_t = pose_net(hidden_state_t)
                     pred_future_egomotions.append(flow_t)
-                flow_t = pose_vec2mat(flow_t)
                 for i in range(self.n_gru_blocks):
                     if i == 0:
                         gru_input = x[:, t]
@@ -595,7 +594,6 @@ class FuturePredictionAutoregressive(torch.nn.Module):
                         # Compute future egomotion
                         flow_t = pose_net(z_t)
                         pred_future_egomotions.append(flow_t)
-                        flow_t = pose_vec2mat(flow_t)
                         # Warp features
                         gru_input = self.spatial_grus[i].warp_features(z_t, flow_t)
                     else:
@@ -625,9 +623,10 @@ class FuturePredictionAutoregressive(torch.nn.Module):
 
 
 class PoseNet(nn.Module):
-    def __init__(self, in_channels, n_predictions=1):
+    def __init__(self, in_channels, n_predictions=1, output_channels=6):
         super().__init__()
         self.n_predictions = n_predictions
+        self.output_channels = output_channels
 
         self.module = nn.Sequential(
             ConvBlock(in_channels, 64, 7, 2),
@@ -647,35 +646,7 @@ class PoseNet(nn.Module):
         out = 0.01 * out.view(-1, 6*self.n_predictions)
 
         if self.n_predictions > 1:
-            out = out.view(-1, self.n_predictions, 6)
-
-        return out
-
-
-class ResPoseNet(nn.Module):
-    def __init__(self, in_channels, n_predictions=1):
-        super().__init__()
-        self.n_predictions = n_predictions
-
-        self.module = nn.Sequential(
-            Bottleneck(in_channels, 64, 7, downsample=True, dropout=0.0),
-            Bottleneck(64, 64, 5, downsample=True, dropout=0.0),
-            Bottleneck(64, 64, 3, downsample=True, dropout=0.0),
-            Bottleneck(64, 128, 3, downsample=True, dropout=0.0),
-            Bottleneck(128, 256, 3, downsample=True, dropout=0.0),
-            Bottleneck(256, 256, 3, downsample=True, dropout=0.0),
-            Bottleneck(256, 256, 3, downsample=True, dropout=0.0),
-            nn.Conv2d(256, 6*n_predictions, 1),
-        )
-
-    def forward(self, x):
-        out = self.module(x)
-        out = out.mean(3).mean(2)
-
-        out = 0.01 * out.view(-1, 6*self.n_predictions)
-
-        if self.n_predictions > 1:
-            out = out.view(-1, self.n_predictions, 6)
+            out = out.view(-1, self.n_predictions, self.output_channels)
 
         return out
 
@@ -691,8 +662,8 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         self.autoregressive_future_prediction = model_config['autoregressive_future_prediction']
         self.autoregressive_l2_loss = model_config['autoregressive_l2_loss']
         self.direct_trajectory_prediction = model_config['direct_trajectory_prediction']
-        self.finetuning = model_config['finetuning']
-        self.predict_future_egomotion = model_config['predict_future_egomotion']  # False
+        self.predict_future_egomotion = model_config['predict_future_egomotion']
+        self.three_dof_egomotion = model_config['three_dof_egomotion']
         self.temporal_model_name = model_config['temporal_model_name']  # gru
         self.disable_bev_prediction = model_config['disable_bev_prediction']
         self.start_out_channels = model_config['start_out_channels']  # 80
@@ -754,7 +725,10 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
             if self.direct_trajectory_prediction:
                 n_predictions += self.n_future
                 pose_in_channels += self.latent_dim
-            self.pose_net = ResPoseNet(pose_in_channels, n_predictions=n_predictions)
+
+            self.pose_net = PoseNet(pose_in_channels, n_predictions=n_predictions)
+        else:
+            self.pose_net = None
 
     def _calculate_future_indices_and_channels(self):
         """ Calculates which indices would be used for the future distribution """
@@ -779,8 +753,6 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
 
     def forward(self, imgs, rots, trans, intrins, post_rots, post_trans, future_egomotions, inference=False,
                 noise=None):
-        if self.finetuning:
-            inference = True
 
         output = {}
         b, s, n, c, h, w = imgs.shape

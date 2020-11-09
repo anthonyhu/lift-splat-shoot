@@ -304,7 +304,6 @@ def get_val_info(model, valloader, losses_fn, device, use_tqdm=True, is_temporal
                 if model.predict_future_egomotion:
                     future_egomotions = future_egomotions.to(device)
                     future_egomotions = future_egomotions[:, (model.receptive_field - 1):].contiguous()
-                    future_egomotions_vec = mat2pose_vec(future_egomotions)
 
             # loss
             losses = {}
@@ -312,8 +311,13 @@ def get_val_info(model, valloader, losses_fn, device, use_tqdm=True, is_temporal
                 losses['dynamic_agents'] = losses_fn['dynamic_agents'](preds, binimgs)
 
             if model.predict_future_egomotion:
-                losses['future_egomotion'] = losses_fn['future_egomotion'](out['future_egomotions'],
-                                                                           future_egomotions_vec)
+                if model.three_dof_egomotion:
+                    # x-y translation and z-axis rotation
+                    pose_slice = [0, 1, 5]
+                else:
+                    pose_slice = list(range(6))
+                losses['future_egomotion'] = losses_fn['future_egomotion'](out['future_egomotions'][:, :, pose_slice],
+                                                                           future_egomotions[:, :, pose_slice])
             if model.probabilistic:
                 losses['kl'] = losses_fn['kl'](out)
 
@@ -344,9 +348,10 @@ def get_val_info(model, valloader, losses_fn, device, use_tqdm=True, is_temporal
             if model.predict_future_egomotion:
                 # Convert predicted 6 DoF egomotion to pose matrix
                 predicted_pose_matrices = pose_vec2mat(out['future_egomotions'])
+                gt_pose_matrices = pose_vec2mat(future_egomotions)
 
                 positional_error, angular_error = compute_egomotion_error(
-                    predicted_pose_matrices.detach().cpu().numpy(), future_egomotions.cpu().numpy()
+                    predicted_pose_matrices.detach().cpu().numpy(), gt_pose_matrices.cpu().numpy()
                 )
                 total_positional_error += positional_error
                 total_angular_error += angular_error

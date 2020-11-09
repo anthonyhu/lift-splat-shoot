@@ -52,8 +52,10 @@ class SpatialGRU(nn.Module):
     @staticmethod
     def warp_features(state, flow, mode='bilinear'):
         b, c, h, w = state.shape
-        angle = torch.atan2(flow[:, 1, 0], flow[:, 0, 0])
-        translation = flow[:, :2, 3]
+        # z-rotation
+        angle = flow[:, 5]  # torch.atan2(flow[:, 1, 0], flow[:, 0, 0])
+        # x-y translation
+        translation = flow[:, :2]  # flow[:, :2, 3]
 
         # Normalise translation to [-1, 1]
         # -1 because the bird's-eye view axes are upside down
