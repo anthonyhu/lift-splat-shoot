@@ -20,12 +20,12 @@ from .tools import get_batch_iou, compute_miou, get_val_info, pose_vec2mat, comp
 from .utils import print_model_spec, set_module_grad
 
 BATCH_SIZE = 3
-TAG = 'no_egomotion_NO_inference'
+TAG = 'single_step_ego_weight=1'
 OUTPUT_PATH = './runs/3_dof'
 
 
-PREDICT_FUTURE_EGOMOTION = False
-WARMSTART_STEPS = 10000000
+PREDICT_FUTURE_EGOMOTION = True
+WARMSTART_STEPS = 10000
 VAL_STEPS = 10000
 THREE_DOF_EGOMOTION = True
 DIRECT_TRAJECTORY_PREDICTION = False
@@ -39,7 +39,7 @@ N_FUTURE = 3
 
 LOSS_WEIGHTS = {'dynamic_agents': 1.0,
                 'static_agents': 0.5,
-                'future_egomotion': 0.1,
+                'future_egomotion': 1.0,
                 'kl': 0.01,
                 'autoregressive': 0.1,
                 }
