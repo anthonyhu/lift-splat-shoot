@@ -368,11 +368,13 @@ def get_val_info(model, valloader, losses_fn, device, use_tqdm=True, is_temporal
     t1 = time()
     print(f'Evaluation on the validation set took: {(t1 - t0) / 60}mins')
 
+    n_batches = len(valloader) / 10
+
     return {
-            'loss': total_loss / len(valloader),
-            'vehicles_iou': total_vehicles_iou / len(valloader),
-            'positional_error': total_positional_error / len(valloader),
-            'angular_error': total_angular_error / len(valloader),
+            'loss': total_loss / n_batches,
+            'vehicles_iou': total_vehicles_iou / n_batches,
+            'positional_error': total_positional_error / n_batches,
+            'angular_error': total_angular_error / n_batches,
             }
 
 

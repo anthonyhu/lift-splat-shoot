@@ -19,19 +19,18 @@ from .tools import get_batch_iou, compute_miou, get_val_info, pose_vec2mat, comp
     compute_egomotion_error_plane
 from .utils import print_model_spec, set_module_grad
 
-BATCH_SIZE = 3
-TAG = 'n_gru=1_single_step'
+BATCH_SIZE = 1
+TAG = 'n_gru=1_full_traj_tempblock'
 OUTPUT_PATH = './runs/3_dof'
 
 
 PREDICT_FUTURE_EGOMOTION = True
 WARMSTART_STEPS = 5000
 VAL_STEPS = 5000
-THREE_DOF_EGOMOTION = True
-DIRECT_TRAJECTORY_PREDICTION = False
+DIRECT_TRAJECTORY_PREDICTION = True
 PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
 
-TEMPORAL_MODEL_NAME = 'gru'
+TEMPORAL_MODEL_NAME = 'temporal_block'
 RECEPTIVE_FIELD = 3
 N_FUTURE = 3
 
@@ -42,12 +41,13 @@ LOSS_WEIGHTS = {'dynamic_agents': 1.0,
                 'autoregressive': 0.1,
                 }
 
-# if 'direwolf' in socket.gethostname():
-#     RECEPTIVE_FIELD = 2
-#     N_FUTURE = 2
+if 'direwolf' in socket.gethostname():
+    RECEPTIVE_FIELD = 2
+    N_FUTURE = 2
 
 MODEL_NAME = 'temporal'
 PROBABILISTIC = True
+THREE_DOF_EGOMOTION = True
 DISABLE_BEV_PREDICTION = False
 AUTOREGRESSIVE_L2_LOSS = False
 AUTOREGRESSIVE_FUTURE_PREDICTION = False
