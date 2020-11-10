@@ -19,18 +19,17 @@ from .tools import get_batch_iou, compute_miou, get_val_info, pose_vec2mat, comp
     compute_egomotion_error_plane
 from .utils import print_model_spec, set_module_grad
 
-BATCH_SIZE = 1
-TAG = 'default'
-OUTPUT_PATH = './runs/debug'
+BATCH_SIZE = 3
+TAG = 'n_gru=1_single_step'
+OUTPUT_PATH = './runs/3_dof'
 
 
 PREDICT_FUTURE_EGOMOTION = True
-WARMSTART_STEPS = 10000
-VAL_STEPS = 10000
+WARMSTART_STEPS = 5000
+VAL_STEPS = 5000
 THREE_DOF_EGOMOTION = True
 DIRECT_TRAJECTORY_PREDICTION = False
 PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
-AUTOREGRESSIVE_FUTURE_PREDICTION = False
 
 TEMPORAL_MODEL_NAME = 'gru'
 RECEPTIVE_FIELD = 3
@@ -51,6 +50,7 @@ MODEL_NAME = 'temporal'
 PROBABILISTIC = True
 DISABLE_BEV_PREDICTION = False
 AUTOREGRESSIVE_L2_LOSS = False
+AUTOREGRESSIVE_FUTURE_PREDICTION = False
 MODEL_CONFIG = {'receptive_field': RECEPTIVE_FIELD,
                 'n_future': N_FUTURE,
                 'latent_dim': 16,

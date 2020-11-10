@@ -258,7 +258,9 @@ def get_val_info(model, valloader, losses_fn, device, use_tqdm=True, is_temporal
     print('running eval...')
     loader = tqdm(valloader) if use_tqdm else valloader
     with torch.no_grad():
-        for batch in loader:
+        for i, batch in enumerate(loader):
+            if i % 10 != 0:  # Speed up evaluation
+                continue
             allimgs, rots, trans, intrins, post_rots, post_trans, binimgs, static_labels, future_egomotions = batch
 
             if repeat_baseline:
