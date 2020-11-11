@@ -19,25 +19,25 @@ from .tools import get_batch_iou, compute_miou, get_val_info, pose_vec2mat, comp
     compute_egomotion_error_plane
 from .utils import print_model_spec, set_module_grad
 
-BATCH_SIZE = 1
-TAG = 'n_gru=1_full_traj_tempblock'
+BATCH_SIZE = 3
+TAG = 'n_gru=1_single_step_corrected_warping_kl=0.05'
 OUTPUT_PATH = './runs/3_dof'
 
 
 PREDICT_FUTURE_EGOMOTION = True
 WARMSTART_STEPS = 5000
 VAL_STEPS = 5000
-DIRECT_TRAJECTORY_PREDICTION = True
+DIRECT_TRAJECTORY_PREDICTION = False
 PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
 
-TEMPORAL_MODEL_NAME = 'temporal_block'
+TEMPORAL_MODEL_NAME = 'gru'
 RECEPTIVE_FIELD = 3
 N_FUTURE = 3
 
 LOSS_WEIGHTS = {'dynamic_agents': 1.0,
                 'static_agents': 0.5,
                 'future_egomotion': 0.1,
-                'kl': 0.01,
+                'kl': 0.05,
                 'autoregressive': 0.1,
                 }
 

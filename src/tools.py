@@ -389,7 +389,7 @@ def add_ego(bx, dx):
     ])
     pts = (pts - bx) / dx
     pts[:, [0,1]] = pts[:, [1,0]]
-    plt.fill(pts[:, 0], pts[:, 1], '#76b900')
+    plt.fill(pts[:, 0], pts[:, 1], '#2b2d42')
 
 
 def get_nusc_maps(map_folder):

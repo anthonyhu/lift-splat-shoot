@@ -60,8 +60,9 @@ class SpatialGRU(nn.Module):
         translation = flow[:, :2]  # flow[:, :2, 3]
 
         # Normalise translation to [-1, 1]
-        # -1 because the bird's-eye view axes are upside down
-        translation = translation / (-BEV_METERS)
+        translation = translation / (BEV_METERS)
+        # forward axis is inversed
+        translation[:, 0] *= -1
 
         cos_theta = torch.cos(angle)
         sin_theta = torch.sin(angle)
