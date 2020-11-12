@@ -33,7 +33,10 @@ def cost_map_loss(output, future_trajectory, templates):
     n_templates, n_future_points, _ = template_trajectories.shape
 
     # present cost map
-    cost_map = output['cost_map'][:, 0, 0]  # (batch, 200, 200)
+    if len(output['cost_map'].shape) == 5:
+        cost_map = output['cost_map'][:, 0, 0]  # (batch, 200, 200)
+    else:
+        cost_map = output['cost_map'][:, 0]
     batch_size, h, w = cost_map.shape
     # Label is the closest to the template trajectories.
     # (batch, 1000, 10, 2)

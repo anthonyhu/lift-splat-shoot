@@ -20,7 +20,7 @@ from .tools import get_batch_iou, compute_miou, get_val_info, pose_vec2mat, comp
 from .utils import print_model_spec, set_module_grad
 
 BATCH_SIZE = 3
-TAG = 'weight=1.0'
+TAG = 'static_model_weight=1.0'
 OUTPUT_PATH = './runs/cost_map'
 
 OUTPUT_COST_MAP = True
@@ -46,8 +46,8 @@ LOSS_WEIGHTS = {'dynamic_agents': 1.0,
 #     RECEPTIVE_FIELD = 2
 #     N_FUTURE = 2
 
-MODEL_NAME = 'temporal'
-PROBABILISTIC = True
+MODEL_NAME = 'basic'
+PROBABILISTIC = False
 THREE_DOF_EGOMOTION = True
 DISABLE_BEV_PREDICTION = False
 AUTOREGRESSIVE_L2_LOSS = False

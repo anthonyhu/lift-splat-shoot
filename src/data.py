@@ -387,7 +387,10 @@ class SegmentationData(NuscData):
         cams = self.choose_cams()
         imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
         binimg = self.get_dynamic_label(rec)
-        static_label = self.get_static_label(rec, index)
+        if self.map_labels:
+            static_label = self.get_static_label(rec, index)
+        else:
+            static_label = []
         future_egomotion = self.get_future_egomotion(rec, index)
         if self.output_cost_map:
             future_trajectory = self.get_cost_map_trajectory(index)

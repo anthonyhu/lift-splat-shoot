@@ -144,10 +144,11 @@ class BevEncode(nn.Module):
 
 
 class LiftSplatShoot(nn.Module):
-    def __init__(self, grid_conf, data_aug_conf, outC):
+    def __init__(self, grid_conf, data_aug_conf, outC, model_config):
         super(LiftSplatShoot, self).__init__()
         self.grid_conf = grid_conf
         self.data_aug_conf = data_aug_conf
+        self.output_cost_map = model_config['output_cost_map']
 
         dx, bx, nx = gen_dx_bx(self.grid_conf['xbound'],
                                               self.grid_conf['ybound'],
@@ -162,7 +163,7 @@ class LiftSplatShoot(nn.Module):
         self.frustum = self.create_frustum()
         self.D, _, _, _ = self.frustum.shape
         self.camencode = CamEncode(self.D, self.camC, self.downsample)
-        self.bevencode = BevEncode(inC=self.camC, outC=outC)
+        self.bevencode = BevEncode(inC=self.camC, outC=outC, output_cost_map=self.output_cost_map)
 
         # toggle using QuickCumsum vs. autograd
         self.use_quickcumsum = True
@@ -275,10 +276,10 @@ class LiftSplatShoot(nn.Module):
     def unpack_sequence_dim(x, b, s):
         return x.view(b, s, *x.shape[1:])
 
-    def forward(self, x, rots, trans, intrins, post_rots, post_trans, future_egomotions):
+    def forward(self, x, rots, trans, intrins, post_rots, post_trans, future_egomotions, inference=False):
         x = self.get_voxels(x, rots, trans, intrins, post_rots, post_trans)
-        x = self.bevencode(x)
-        return {'bev': x['bev']}
+        output = self.bevencode(x)
+        return output
 
 
 class TemporalModel(nn.Module):
@@ -907,6 +908,6 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
 
 def compile_model(grid_conf, data_aug_conf, outC, name='basic', model_config={}):
     if name == 'basic':
-        return LiftSplatShoot(grid_conf, data_aug_conf, outC)
+        return LiftSplatShoot(grid_conf, data_aug_conf, outC, model_config)
     elif name == 'temporal':
         return TemporalLiftSplatShoot(grid_conf, data_aug_conf, outC, model_config)
