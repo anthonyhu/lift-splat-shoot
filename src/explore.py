@@ -81,7 +81,7 @@ def lidar_check(version,
 
     for epoch in range(nepochs):
         for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, pts, binimgs, static_labels,
-                     future_egomotions) in enumerate(
+                     future_egomotions, future_trajectory) in enumerate(
                 loader):
 
             img_pts = model.get_geometry(rots, trans, intrins, post_rots, post_trans)
@@ -275,7 +275,8 @@ def viz_model_preds(version,
     model.eval()
     counter = 0
     with torch.no_grad():
-        for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, binimgs, static_labels, future_egomotions) in \
+        for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, binimgs, static_labels, future_egomotions, future_trajectory
+                     ) in \
                 enumerate(loader):
             out = model(imgs.to(device),
                     rots.to(device),

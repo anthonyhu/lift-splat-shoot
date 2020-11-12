@@ -14,18 +14,18 @@ import os
 
 from .models import compile_model
 from .data import compile_data
-from .losses import probabilistic_kl_loss
+from .losses import probabilistic_kl_loss, cost_map_loss
 from .tools import get_batch_iou, compute_miou, get_val_info, pose_vec2mat, compute_egomotion_error, \
     compute_egomotion_error_plane
 from .utils import print_model_spec, set_module_grad
 
 BATCH_SIZE = 3
-TAG = 'n_gru=1_single_step_corrected_warping_kl=0.05'
-OUTPUT_PATH = './runs/3_dof'
+TAG = 'weight=1.0'
+OUTPUT_PATH = './runs/cost_map'
 
-
-PREDICT_FUTURE_EGOMOTION = True
-WARMSTART_STEPS = 5000
+OUTPUT_COST_MAP = True
+PREDICT_FUTURE_EGOMOTION = False
+WARMSTART_STEPS = 5000000
 VAL_STEPS = 5000
 DIRECT_TRAJECTORY_PREDICTION = False
 PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
@@ -39,11 +39,12 @@ LOSS_WEIGHTS = {'dynamic_agents': 1.0,
                 'future_egomotion': 0.1,
                 'kl': 0.05,
                 'autoregressive': 0.1,
+                'cost_map': 1.0,
                 }
 
-if 'direwolf' in socket.gethostname():
-    RECEPTIVE_FIELD = 2
-    N_FUTURE = 2
+# if 'direwolf' in socket.gethostname():
+#     RECEPTIVE_FIELD = 2
+#     N_FUTURE = 2
 
 MODEL_NAME = 'temporal'
 PROBABILISTIC = True
@@ -59,6 +60,7 @@ MODEL_CONFIG = {'receptive_field': RECEPTIVE_FIELD,
                 'autoregressive_l2_loss': AUTOREGRESSIVE_L2_LOSS,
                 'direct_trajectory_prediction': DIRECT_TRAJECTORY_PREDICTION,
                 'predict_future_egomotion': PREDICT_FUTURE_EGOMOTION,
+                'output_cost_map': OUTPUT_COST_MAP,
                 'three_dof_egomotion': THREE_DOF_EGOMOTION,
                 'temporal_model_name': TEMPORAL_MODEL_NAME,
                 'disable_bev_prediction': DISABLE_BEV_PREDICTION,
@@ -142,7 +144,7 @@ def train(version,
     trainloader, valloader = compile_data(version, dataroot, data_aug_conf=data_aug_conf,
                                           grid_conf=grid_conf, bsz=bsz, nworkers=nworkers,
                                           parser_name=parser_name, sequence_length=SEQUENCE_LENGTH,
-                                          map_labels=MAP_LABELS)
+                                          map_labels=MAP_LABELS, output_cost_map=OUTPUT_COST_MAP)
 
     device = torch.device('cuda:0')
 
@@ -190,15 +192,32 @@ def train(version,
     if AUTOREGRESSIVE_L2_LOSS:
         losses_fn['autoregressive'] = torch.nn.MSELoss()
 
+    if model.output_cost_map:
+        losses_fn['cost_map'] = cost_map_loss
+
     writer = SummaryWriter(logdir=logdir)
     val_step = 10 if version == 'mini' else VAL_STEPS
     train_eval_step = 10 if version == 'mini' else 100
 
     model.train()
     counter = 0
+
+    if model.output_cost_map:
+        template_trajectories = torch.from_numpy(np.load('./motion_planning_data/kmeans_K=1000_traj.npy')).float()
+        template_trajectories = template_trajectories.to(device)
+
+        # shape (1000, 10)
+        template_row_indices = (-2 * template_trajectories[..., 0] + 100).long()
+        template_col_indices = (2 * template_trajectories[..., 1] + 100).long()
+        templates = {'trajectories': template_trajectories,
+                     'row_indices': template_row_indices,
+                     'col_indices': template_col_indices,
+                     }
+
     for epoch in range(nepochs):
         np.random.seed()
-        for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, binimgs, static_labels, future_egomotions) in \
+        for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, binimgs, static_labels, future_egomotions, future_trajectory
+                     ) in \
                 enumerate(
                 trainloader):
 
@@ -251,6 +270,9 @@ def train(version,
             if AUTOREGRESSIVE_L2_LOSS:
                 losses['autoregressive'] = losses_fn['autoregressive'](out['z'][:, model.receptive_field:],
                                                                        out['z_future_pred'])
+
+            if model.output_cost_map:
+                losses['cost_map'] = losses_fn['cost_map'](out, future_trajectory, templates)
 
             # Calculate total loss
             loss = torch.zeros(1, dtype=torch.float32).to(device)

@@ -257,11 +257,23 @@ def get_val_info(model, valloader, losses_fn, device, use_tqdm=True, is_temporal
     total_angular_error = 0
     print('running eval...')
     loader = tqdm(valloader) if use_tqdm else valloader
+
+    if model.output_cost_map:
+        template_trajectories = torch.from_numpy(np.load('./motion_planning_data/kmeans_K=1000_traj.npy')).float()
+        template_trajectories = template_trajectories.to(device)
+
+        # shape (1000, 10)
+        template_row_indices = (-2 * template_trajectories[..., 0] + 100).long()
+        template_col_indices = (2 * template_trajectories[..., 1] + 100).long()
+        templates = {'trajectories': template_trajectories,
+                     'row_indices': template_row_indices,
+                     'col_indices': template_col_indices,
+                     }
     with torch.no_grad():
         for i, batch in enumerate(loader):
             if i % 10 != 0:  # Speed up evaluation
                 continue
-            allimgs, rots, trans, intrins, post_rots, post_trans, binimgs, static_labels, future_egomotions = batch
+            allimgs, rots, trans, intrins, post_rots, post_trans, binimgs, static_labels, future_egomotions, future_trajectory = batch
 
             if repeat_baseline:
                 b, s, n, c, h, w = allimgs.shape
@@ -327,6 +339,9 @@ def get_val_info(model, valloader, losses_fn, device, use_tqdm=True, is_temporal
                 losses['autoregressive'] = losses_fn['autoregressive'](out['z'][:, model.receptive_field:],
                                                                        out['z_future_pred'])
 
+            if model.output_cost_map:
+                losses['cost_map'] = losses_fn['cost_map'](out, future_trajectory, templates)
+
             # Calculate total loss
             loss = torch.zeros(1, dtype=torch.float32).to(device)
 
@@ -389,7 +404,7 @@ def add_ego(bx, dx):
     ])
     pts = (pts - bx) / dx
     pts[:, [0,1]] = pts[:, [1,0]]
-    plt.fill(pts[:, 0], pts[:, 1], '#2b2d42')
+    plt.fill(pts[:, 0], pts[:, 1], '#000000')
 
 
 def get_nusc_maps(map_folder):
@@ -668,6 +683,45 @@ def compute_egomotion_error_plane(pred, gt):
     return positional_error, angular_error
 
 
+def compute_future_trajectory(dataset, index, n_future_points=10):
+    trajectory = []
+    accumulated_ego_pose = None
+    valid_sequence = True
+    for t in range(n_future_points):
+        if (index + t + 1) >= len(dataset):
+            return [], False
+        rec_t0 = dataset.ixes[index + t]
+        rec_t1 = dataset.ixes[index + t + 1]
+
+        egopose_t0 = \
+            dataset.nusc.get('ego_pose', dataset.nusc.get('sample_data', rec_t0['data']['LIDAR_TOP'])['ego_pose_token'])
+        egopose_t1 = \
+            dataset.nusc.get('ego_pose', dataset.nusc.get('sample_data', rec_t1['data']['LIDAR_TOP'])['ego_pose_token'])
+
+        egopose_t0 = convert_egopose_to_matrix(egopose_t0)
+        egopose_t1 = convert_egopose_to_matrix(egopose_t1)
+
+        future_egomotion = np.linalg.inv(egopose_t1).dot(egopose_t0)
+        if accumulated_ego_pose is not None:
+            future_egomotion = future_egomotion.dot(accumulated_ego_pose)
+        future_egomotion[3, :3] = 0.0
+        future_egomotion[3, 3] = 1.0
+
+        accumulated_ego_pose = future_egomotion
+
+        trajectory.append(future_egomotion[:2, 3])
+
+        if rec_t0['scene_token'] != rec_t1['scene_token']:
+            valid_sequence = False
+            print(f'Invalid sequence at index {index}')
+
+    if valid_sequence:
+        trajectory = np.stack(trajectory, axis=0)
+    else:
+        trajectory = []
+
+    return trajectory, valid_sequence
+
 def save_static_labels(dataroot='/data/cvfs/ah2029/datasets/nuscenes', version='mini', n_processes=6):
     from src.data import SegmentationData
     from nuscenes.nuscenes import NuScenes
@@ -737,7 +791,7 @@ def save_static_labels(dataroot='/data/cvfs/ah2029/datasets/nuscenes', version='
 
 
 def save_static_label_iter(i, dataset, dataroot, mode):
-    imgs, rots, trans, intrins, post_rots, post_trans, binimg, static_label, future_egomotion = dataset[i]
+    imgs, rots, trans, intrins, post_rots, post_trans, binimg, static_label, future_egomotion, future_trajectory = dataset[i]
 
     output_path = os.path.join(dataroot, 'static_label', mode)
     os.makedirs(output_path, exist_ok=True)

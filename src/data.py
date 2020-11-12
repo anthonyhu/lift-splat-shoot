@@ -20,20 +20,23 @@ from nuscenes.utils.data_classes import Box
 from glob import glob
 
 from .tools import get_lidar_data, img_transform, normalize_img, gen_dx_bx, get_nusc_maps, get_local_map, \
-    convert_egopose_to_matrix, mat2pose_vec
+    convert_egopose_to_matrix, mat2pose_vec, compute_future_trajectory
 from .utils import convert_figure_numpy
-from .constants import DRIVEABLE_AREA_ID, LINE_MARKINGS_ID
+from .constants import DRIVEABLE_AREA_ID, LINE_MARKINGS_ID, N_FUTURE_POINTS
+
+RECEPTIVE_FIELD = 3
 
 
 class NuscData(torch.utils.data.Dataset):
     def __init__(self, nusc, is_train, data_aug_conf, grid_conf, sequence_length=0, map_labels=False,
-                 dataroot=''):
+                 dataroot='', output_cost_map=False):
         self.nusc = nusc
         self.is_train = is_train
         self.data_aug_conf = data_aug_conf
         self.grid_conf = grid_conf
         self.sequence_length = sequence_length
         self.map_labels = map_labels
+        self.output_cost_map = output_cost_map
         self.dataroot = dataroot
         self.mode = 'train' if self.is_train else 'val'
 
@@ -335,6 +338,14 @@ class NuscData(torch.utils.data.Dataset):
         future_egomotion = mat2pose_vec(future_egomotion)
         return future_egomotion
 
+    def get_cost_map_trajectory(self, index):
+        trajectory, valid_sequence = compute_future_trajectory(self, index, n_future_points=N_FUTURE_POINTS)
+        if valid_sequence:
+            trajectory = torch.Tensor(trajectory).float()
+        else:
+            trajectory = []
+        return trajectory
+
     def choose_cams(self):
         if self.is_train and self.data_aug_conf['Ncams'] < len(self.data_aug_conf['cams']):
             cams = np.random.choice(self.data_aug_conf['cams'], self.data_aug_conf['Ncams'],
@@ -378,8 +389,13 @@ class SegmentationData(NuscData):
         binimg = self.get_dynamic_label(rec)
         static_label = self.get_static_label(rec, index)
         future_egomotion = self.get_future_egomotion(rec, index)
-        
-        return imgs, rots, trans, intrins, post_rots, post_trans, binimg, static_label, future_egomotion
+        if self.output_cost_map:
+            future_trajectory = self.get_cost_map_trajectory(index)
+        else:
+            future_trajectory = []
+
+        return imgs, rots, trans, intrins, post_rots, post_trans, binimg, static_label, future_egomotion, \
+               future_trajectory
 
 
 class SequentialSegmentationData(SegmentationData):
@@ -424,6 +440,14 @@ class SequentialSegmentationData(SegmentationData):
             previous_rec = rec
             previous_index_t = index_t
 
+        if self.output_cost_map:
+            time_offset = RECEPTIVE_FIELD - 1
+            future_trajectory = self.get_cost_map_trajectory(index + time_offset)
+            if len(future_trajectory) > 0:
+                future_trajectory.unsqueeze(1)
+        else:
+            future_trajectory = []
+
         list_imgs, list_rots, list_trans, list_intrins = torch.stack(list_imgs), torch.stack(list_rots), \
                                                          torch.stack(list_trans), torch.stack(list_intrins)
 
@@ -434,8 +458,7 @@ class SequentialSegmentationData(SegmentationData):
         list_future_egomotion = torch.stack(list_future_egomotion)
 
         return (list_imgs, list_rots, list_trans, list_intrins, list_post_rots, list_post_trans, list_binimg,
-                list_static_label, list_future_egomotion)
-
+                list_static_label, list_future_egomotion, future_trajectory)
 
 
 def worker_rnd_init(x):
@@ -443,7 +466,7 @@ def worker_rnd_init(x):
 
 
 def compile_data(version, dataroot, data_aug_conf, grid_conf, bsz,
-                 nworkers, parser_name, sequence_length=0, map_labels=False):
+                 nworkers, parser_name, sequence_length=0, map_labels=False, output_cost_map=False):
     dataroot = os.path.join(dataroot, version)
 
     nusc = NuScenes(version='v1.0-{}'.format(version),
@@ -456,10 +479,10 @@ def compile_data(version, dataroot, data_aug_conf, grid_conf, bsz,
     }[parser_name]
     traindata = parser(nusc, is_train=True, data_aug_conf=data_aug_conf,
                        grid_conf=grid_conf, sequence_length=sequence_length, map_labels=map_labels,
-                       dataroot=dataroot)
+                       dataroot=dataroot, output_cost_map=output_cost_map)
     valdata = parser(nusc, is_train=False, data_aug_conf=data_aug_conf,
                      grid_conf=grid_conf, sequence_length=sequence_length, map_labels=map_labels,
-                     dataroot=dataroot)
+                     dataroot=dataroot, output_cost_map=output_cost_map)
 
     trainloader = torch.utils.data.DataLoader(traindata, batch_size=bsz,
                                               shuffle=True,

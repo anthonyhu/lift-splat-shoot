@@ -91,8 +91,9 @@ class CamEncode(nn.Module):
 
 
 class BevEncode(nn.Module):
-    def __init__(self, inC, outC):
+    def __init__(self, inC, outC, output_cost_map=False):
         super(BevEncode, self).__init__()
+        self.output_cost_map = output_cost_map
 
         trunk = resnet18(pretrained=False, zero_init_residual=True)
         self.conv1 = nn.Conv2d(inC, 64, kernel_size=7, stride=2, padding=3,
@@ -114,7 +115,18 @@ class BevEncode(nn.Module):
             nn.Conv2d(128, outC, kernel_size=1, padding=0),
         )
 
+        if self.output_cost_map:
+            self.cost_map_decoder = nn.Sequential(
+                nn.Upsample(scale_factor=2, mode='bilinear',
+                                  align_corners=True),
+                nn.Conv2d(256, 128, kernel_size=3, padding=1, bias=False),
+                nn.BatchNorm2d(128),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(128, 1, kernel_size=1, padding=0),
+        )
+
     def forward(self, x):
+        output = {}
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -124,9 +136,11 @@ class BevEncode(nn.Module):
         x = self.layer3(x)
 
         x = self.up1(x, x1)
-        x = self.up2(x)
+        output['bev'] = self.up2(x)
+        if self.output_cost_map:
+            output['cost_map'] = self.cost_map_decoder(x)
 
-        return x
+        return output
 
 
 class LiftSplatShoot(nn.Module):
@@ -264,7 +278,7 @@ class LiftSplatShoot(nn.Module):
     def forward(self, x, rots, trans, intrins, post_rots, post_trans, future_egomotions):
         x = self.get_voxels(x, rots, trans, intrins, post_rots, post_trans)
         x = self.bevencode(x)
-        return {'bev': x}
+        return {'bev': x['bev']}
 
 
 class TemporalModel(nn.Module):
@@ -669,6 +683,7 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         self.autoregressive_l2_loss = model_config['autoregressive_l2_loss']
         self.direct_trajectory_prediction = model_config['direct_trajectory_prediction']
         self.predict_future_egomotion = model_config['predict_future_egomotion']
+        self.output_cost_map = model_config['output_cost_map']
         self.three_dof_egomotion = model_config['three_dof_egomotion']
         self.temporal_model_name = model_config['temporal_model_name']  # gru
         self.disable_bev_prediction = model_config['disable_bev_prediction']
@@ -723,7 +738,7 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
             )
 
         if not self.disable_bev_prediction:
-            self.bevencode = BevEncode(inC=self.future_pred_in_channels, outC=outC)
+            self.bevencode = BevEncode(inC=self.future_pred_in_channels, outC=outC, output_cost_map=self.output_cost_map)
 
         if self.predict_future_egomotion:
             n_predictions = 1
@@ -735,6 +750,7 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
             self.pose_net = PoseNet(pose_in_channels, n_predictions=n_predictions)
         else:
             self.pose_net = None
+
 
     def _calculate_future_indices_and_channels(self):
         """ Calculates which indices would be used for the future distribution """
@@ -823,8 +839,9 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         # Predict bev segmentations
         if not self.disable_bev_prediction:
             bev_output = self.bevencode(z_future)
-            bev_output = self.unpack_sequence_dim(bev_output, b, new_s)
-            output['bev'] = bev_output
+            for key, value in bev_output.items():
+                bev_output[key] = self.unpack_sequence_dim(value, b, new_s)
+            output = {**output, **bev_output}
 
         if self.predict_future_egomotion and not inference:
             if self.direct_trajectory_prediction:
