@@ -19,13 +19,13 @@ from .tools import get_batch_iou, compute_miou, get_val_info, pose_vec2mat, comp
     compute_egomotion_error_plane
 from .utils import print_model_spec, set_module_grad
 
-BATCH_SIZE = 2
-TAG = 'top_k'
-OUTPUT_PATH = './runs/top_k_loss'
+BATCH_SIZE = 3
+TAG = 'top_k_gru_kl=0.5_warping_but_no_loss'
+OUTPUT_PATH = './runs/top_k'
 
 OUTPUT_COST_MAP = False
-PREDICT_FUTURE_EGOMOTION = False
-WARMSTART_STEPS = 5000000
+PREDICT_FUTURE_EGOMOTION = True
+WARMSTART_STEPS = 0
 VAL_STEPS = 5000
 DIRECT_TRAJECTORY_PREDICTION = False
 PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
@@ -33,13 +33,13 @@ PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
 USE_TOP_K = True
 TOP_K_RATIO = 0.5
 
-TEMPORAL_MODEL_NAME = 'temporal_block'
+TEMPORAL_MODEL_NAME = 'gru'
 RECEPTIVE_FIELD = 3
 N_FUTURE = 3
 
 LOSS_WEIGHTS = {'dynamic_agents': 1.0,
                 'static_agents': 0.5,
-                'future_egomotion': 0.1,
+                'future_egomotion': 0.0,
                 'kl': 0.5,
                 'autoregressive': 0.1,
                 'cost_map': 1.0,
@@ -266,8 +266,9 @@ def train(version,
                     pose_slice = [0, 1, 5]
                 else:
                     pose_slice = list(range(6))
-                losses['future_egomotion'] = losses_fn['future_egomotion'](out['future_egomotions'][:, :, pose_slice],
-                                                                           future_egomotions[:, :, pose_slice])
+                losses['future_egomotion'] = torch.zeros(1, dtype=torch.float32).to(device)
+                #losses_fn['future_egomotion'](out['future_egomotions'][:, :, pose_slice],
+                                              #                             future_egomotions[:, :, pose_slice])
 
             if PROBABILISTIC:
                 losses['kl'] = losses_fn['kl'](out)

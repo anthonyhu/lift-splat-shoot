@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def print_model_spec(model, name=''):
     n_parameters = count_n_parameters(model)
     n_trainable_parameters = count_n_parameters(model, only_trainable=True)

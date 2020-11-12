@@ -330,8 +330,9 @@ def get_val_info(model, valloader, losses_fn, device, use_tqdm=True, is_temporal
                     pose_slice = [0, 1, 5]
                 else:
                     pose_slice = list(range(6))
-                losses['future_egomotion'] = losses_fn['future_egomotion'](out['future_egomotions'][:, :, pose_slice],
-                                                                           future_egomotions[:, :, pose_slice])
+                losses['future_egomotion'] = torch.zeros(1, dtype=torch.float32).to(device)
+                #losses_fn['future_egomotion'](out['future_egomotions'][:, :, pose_slice],
+                                              #                             future_egomotions[:, :, pose_slice])
             if model.probabilistic:
                 losses['kl'] = losses_fn['kl'](out)
 
