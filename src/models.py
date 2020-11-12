@@ -148,7 +148,21 @@ class LiftSplatShoot(nn.Module):
         super(LiftSplatShoot, self).__init__()
         self.grid_conf = grid_conf
         self.data_aug_conf = data_aug_conf
+        self.receptive_field = model_config['receptive_field']  # 3
+        self.n_future = model_config['n_future']  # 5
+        self.latent_dim = model_config['latent_dim']  # 16
+        self.probabilistic = model_config['probabilistic']
+        self.autoregressive_future_prediction = model_config['autoregressive_future_prediction']
+        self.autoregressive_l2_loss = model_config['autoregressive_l2_loss']
+        self.direct_trajectory_prediction = model_config['direct_trajectory_prediction']
+        self.predict_future_egomotion = model_config['predict_future_egomotion']
         self.output_cost_map = model_config['output_cost_map']
+        self.three_dof_egomotion = model_config['three_dof_egomotion']
+        self.temporal_model_name = model_config['temporal_model_name']  #  gru
+        self.disable_bev_prediction = model_config['disable_bev_prediction']
+        self.start_out_channels = model_config['start_out_channels']  # 80
+        self.extra_in_channels = model_config['extra_in_channels']  # 8
+        self.use_pyramid_pooling = model_config['use_pyramid_pooling']  # False
 
         dx, bx, nx = gen_dx_bx(self.grid_conf['xbound'],
                                               self.grid_conf['ybound'],
