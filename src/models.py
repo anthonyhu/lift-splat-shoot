@@ -312,7 +312,7 @@ class TemporalModel(nn.Module):
         self.use_pyramid_pooling = use_pyramid_pooling
 
         self.n_temporal_layers = receptive_field - 1
-        self.n_spatial_layers_between_temporal_layers = 3
+        self.n_spatial_layers_between_temporal_layers = 1
 
         self.model = self.create_model()
 
@@ -688,7 +688,7 @@ class PoseNet(nn.Module):
 
 class TemporalLiftSplatShoot(LiftSplatShoot):
     def __init__(self, grid_conf, data_aug_conf, outC, model_config):
-        super().__init__(grid_conf, data_aug_conf, outC)
+        super().__init__(grid_conf, data_aug_conf, outC, model_config)
 
         self.receptive_field = model_config['receptive_field']  # 3
         self.n_future = model_config['n_future']  # 5
@@ -765,7 +765,6 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
             self.pose_net = PoseNet(pose_in_channels, n_predictions=n_predictions)
         else:
             self.pose_net = None
-
 
     def _calculate_future_indices_and_channels(self):
         """ Calculates which indices would be used for the future distribution """
@@ -920,7 +919,7 @@ class TemporalLiftSplatShoot(LiftSplatShoot):
         return sample, output_distribution
 
 
-def compile_model(grid_conf, data_aug_conf, outC, name='basic', model_config={}):
+def compile_model(grid_conf, data_aug_conf, outC, name='basic', model_config=None):
     if name == 'basic':
         return LiftSplatShoot(grid_conf, data_aug_conf, outC, model_config)
     elif name == 'temporal':

@@ -14,40 +14,43 @@ import os
 
 from .models import compile_model
 from .data import compile_data
-from .losses import probabilistic_kl_loss, cost_map_loss
+from .losses import probabilistic_kl_loss, cost_map_loss, CrossEntropyLoss
 from .tools import get_batch_iou, compute_miou, get_val_info, pose_vec2mat, compute_egomotion_error, \
     compute_egomotion_error_plane
 from .utils import print_model_spec, set_module_grad
 
-BATCH_SIZE = 3
-TAG = 'static_model_weight=1.0'
-OUTPUT_PATH = './runs/cost_map'
+BATCH_SIZE = 2
+TAG = 'top_k'
+OUTPUT_PATH = './runs/top_k_loss'
 
-OUTPUT_COST_MAP = True
+OUTPUT_COST_MAP = False
 PREDICT_FUTURE_EGOMOTION = False
 WARMSTART_STEPS = 5000000
 VAL_STEPS = 5000
 DIRECT_TRAJECTORY_PREDICTION = False
 PRETRAINED_MODEL_WEIGHTS = './model_weights/model525000.pt'
 
-TEMPORAL_MODEL_NAME = 'gru'
+USE_TOP_K = True
+TOP_K_RATIO = 0.5
+
+TEMPORAL_MODEL_NAME = 'temporal_block'
 RECEPTIVE_FIELD = 3
 N_FUTURE = 3
 
 LOSS_WEIGHTS = {'dynamic_agents': 1.0,
                 'static_agents': 0.5,
                 'future_egomotion': 0.1,
-                'kl': 0.05,
+                'kl': 0.5,
                 'autoregressive': 0.1,
                 'cost_map': 1.0,
                 }
 
-# if 'direwolf' in socket.gethostname():
-#     RECEPTIVE_FIELD = 2
-#     N_FUTURE = 2
+if 'direwolf' in socket.gethostname():
+    RECEPTIVE_FIELD = 2
+    N_FUTURE = 2
 
-MODEL_NAME = 'basic'
-PROBABILISTIC = False
+MODEL_NAME = 'temporal'
+PROBABILISTIC = True
 THREE_DOF_EGOMOTION = True
 DISABLE_BEV_PREDICTION = False
 AUTOREGRESSIVE_L2_LOSS = False
@@ -181,7 +184,9 @@ def train(version,
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     losses_fn = {}
-    losses_fn['dynamic_agents'] = torch.nn.CrossEntropyLoss(weight=torch.Tensor(weight)).to(device)
+    losses_fn['dynamic_agents'] = CrossEntropyLoss(
+        weight=torch.Tensor(weight).to(device), use_top_k=USE_TOP_K, top_k_ratio=TOP_K_RATIO
+    )
 
     if PREDICT_FUTURE_EGOMOTION:
         losses_fn['future_egomotion'] = torch.nn.MSELoss()

@@ -1,4 +1,29 @@
 import torch
+import torch.nn as nn
+
+
+class CrossEntropyLoss(nn.Module):
+    def __init__(self, weight=None, ignore_index=255, use_top_k=False, top_k_ratio=0.5):
+        super().__init__()
+        self.weight = weight
+        self.ignore_index = ignore_index
+        self.use_top_k = use_top_k
+        self.top_k_ratio = top_k_ratio
+
+    def forward(self, prediction, target):
+        # shape (b*s, h, w)
+        loss = nn.functional.cross_entropy(
+            prediction, target, weight=self.weight, ignore_index=self.ignore_index, reduction='none'
+        )
+        # shape(b*s, h*w)
+        loss = loss.view(loss.shape[0], -1)
+        if self.use_top_k:
+            # Penalises the top-k hardest pixels
+            k = int(self.top_k_ratio * loss.shape[1])
+            loss, _ = torch.sort(loss, dim=1, descending=True)
+            loss = loss[:, :k]
+
+        return torch.mean(loss)
 
 
 def probabilistic_kl_loss(output):

@@ -19,8 +19,8 @@ from .models import compile_model
 
 from .train import N_CLASSES, DATAROOT, PRETRAINED_MODEL_WEIGHTS, MODEL_NAME, SEQUENCE_LENGTH, MAP_LABELS, \
     PREDICT_FUTURE_EGOMOTION, DISABLE_BEV_PREDICTION, RECEPTIVE_FIELD, N_FUTURE, MODEL_CONFIG, CROSS_ENTROPY_WEIGHTS, \
-    LOSS_WEIGHTS
-from .losses import probabilistic_kl_loss
+    LOSS_WEIGHTS, USE_TOP_K, TOP_K_RATIO
+from .losses import probabilistic_kl_loss, CrossEntropyLoss
 
 
 def lidar_check(version,
@@ -185,7 +185,9 @@ def eval_model_iou(version,
     model.to(device)
 
     losses_fn = {}
-    losses_fn['dynamic_agents'] = torch.nn.CrossEntropyLoss(weight=torch.Tensor(CROSS_ENTROPY_WEIGHTS)).to(device)
+    losses_fn['dynamic_agents'] = CrossEntropyLoss(
+        weight=torch.Tensor(CROSS_ENTROPY_WEIGHTS).to(device), use_top_k=USE_TOP_K, top_k_ratio=TOP_K_RATIO
+    )
 
     if PREDICT_FUTURE_EGOMOTION:
         losses_fn['future_egomotion'] = torch.nn.MSELoss()
