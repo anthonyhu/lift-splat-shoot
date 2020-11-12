@@ -343,7 +343,7 @@ class NuscData(torch.utils.data.Dataset):
         if valid_sequence:
             trajectory = torch.Tensor(trajectory).float()
         else:
-            trajectory = []
+            trajectory = torch.zeros(10, 2)
         return trajectory
 
     def choose_cams(self):
@@ -443,8 +443,7 @@ class SequentialSegmentationData(SegmentationData):
         if self.output_cost_map:
             time_offset = RECEPTIVE_FIELD - 1
             future_trajectory = self.get_cost_map_trajectory(index + time_offset)
-            if len(future_trajectory) > 0:
-                future_trajectory.unsqueeze(1)
+            future_trajectory.unsqueeze(1)
         else:
             future_trajectory = []
 

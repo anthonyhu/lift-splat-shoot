@@ -59,4 +59,9 @@ def cost_map_loss(output, future_trajectory, templates):
     # (batch, 1000)
     batch_logits = torch.stack(batch_logits, dim=0)
 
-    return torch.nn.functional.cross_entropy(batch_logits, label_index)
+    # Mask invalid trajectories
+    mask = future_trajectory.sum(dim=(-1, -2)) == 0
+
+    if mask.sum() > 0:
+        return torch.nn.functional.cross_entropy(batch_logits[mask], label_index[mask])
+    return output['bev'].new_zeros(1)
