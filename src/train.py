@@ -16,15 +16,15 @@ from .models import compile_model
 from .data import compile_data
 from .losses import probabilistic_kl_loss, cost_map_loss, CrossEntropyLoss
 from .tools import get_batch_iou, compute_miou, get_val_info, pose_vec2mat, compute_egomotion_error, \
-    compute_egomotion_error_plane
+    compute_egomotion_error_plane, load_template_trajectories
 from .utils import print_model_spec, set_module_grad
 
-BATCH_SIZE = 3
+BATCH_SIZE = 1
 TAG = 'top_k_gru_kl=0.5_warping_but_no_loss'
-OUTPUT_PATH = './runs/top_k'
+OUTPUT_PATH = './runs/debug'
 
 OUTPUT_COST_MAP = False
-PREDICT_FUTURE_EGOMOTION = True
+PREDICT_FUTURE_EGOMOTION = False
 WARMSTART_STEPS = 0
 VAL_STEPS = 5000
 DIRECT_TRAJECTORY_PREDICTION = False
@@ -41,7 +41,7 @@ LOSS_WEIGHTS = {'dynamic_agents': 1.0,
                 'static_agents': 0.5,
                 'future_egomotion': 0.0,
                 'kl': 0.5,
-                'autoregressive': 0.1,
+                'autoregressive': 0.0,
                 'cost_map': 1.0,
                 }
 
@@ -208,16 +208,7 @@ def train(version,
     counter = 0
 
     if model.output_cost_map:
-        template_trajectories = torch.from_numpy(np.load('./motion_planning_data/kmeans_K=1000_traj.npy')).float()
-        template_trajectories = template_trajectories.to(device)
-
-        # shape (1000, 10)
-        template_row_indices = (-2 * template_trajectories[..., 0] + 100).long()
-        template_col_indices = (2 * template_trajectories[..., 1] + 100).long()
-        templates = {'trajectories': template_trajectories,
-                     'row_indices': template_row_indices,
-                     'col_indices': template_col_indices,
-                     }
+        templates = load_template_trajectories(device)
 
     for epoch in range(nepochs):
         np.random.seed()

@@ -5,3 +5,4 @@ BEV_METERS = 50.0
 MIN_LOG_SIGMA = -5.0
 MAX_LOG_SIGMA = 5.0
 N_FUTURE_POINTS = 10
+TEMPLATE_PATH = './motion_planning_data/kmeans_K=1000_traj.npy'

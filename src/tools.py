@@ -22,7 +22,7 @@ from nuscenes.utils.data_classes import LidarPointCloud
 from nuscenes.utils.geometry_utils import transform_matrix
 from nuscenes.map_expansion.map_api import NuScenesMap
 
-from .constants import VEHICLES_ID, DRIVEABLE_AREA_ID, LINE_MARKINGS_ID
+from .constants import VEHICLES_ID, DRIVEABLE_AREA_ID, LINE_MARKINGS_ID, TEMPLATE_PATH
 
 
 def get_lidar_data(nusc, sample_rec, nsweeps, min_distance):
@@ -259,16 +259,7 @@ def get_val_info(model, valloader, losses_fn, device, use_tqdm=True, is_temporal
     loader = tqdm(valloader) if use_tqdm else valloader
 
     if model.output_cost_map:
-        template_trajectories = torch.from_numpy(np.load('./motion_planning_data/kmeans_K=1000_traj.npy')).float()
-        template_trajectories = template_trajectories.to(device)
-
-        # shape (1000, 10)
-        template_row_indices = (-2 * template_trajectories[..., 0] + 100).long()
-        template_col_indices = (2 * template_trajectories[..., 1] + 100).long()
-        templates = {'trajectories': template_trajectories,
-                     'row_indices': template_row_indices,
-                     'col_indices': template_col_indices,
-                     }
+        templates = load_template_trajectories(device)
     with torch.no_grad():
         for i, batch in enumerate(loader):
             if i % 10 != 0:  # Speed up evaluation
@@ -722,6 +713,21 @@ def compute_future_trajectory(dataset, index, n_future_points=10):
         trajectory = []
 
     return trajectory, valid_sequence
+
+
+def load_template_trajectories(device):
+    template_trajectories = torch.from_numpy(np.load(TEMPLATE_PATH)).float()
+    template_trajectories = template_trajectories.to(device)
+
+    # shape (1000, 10)
+    template_row_indices = (-2 * template_trajectories[..., 0] + 100).long()
+    template_col_indices = (2 * template_trajectories[..., 1] + 100).long()
+    templates = {'trajectories': template_trajectories,
+                 'row_indices': template_row_indices,
+                 'col_indices': template_col_indices,
+                 }
+    return templates
+
 
 def save_static_labels(dataroot='/data/cvfs/ah2029/datasets/nuscenes', version='mini', n_processes=6):
     from src.data import SegmentationData
