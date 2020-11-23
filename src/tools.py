@@ -420,18 +420,17 @@ def plot_nusc_map(rec, nusc_maps, nusc, scene2map, dx, bx):
 
     poly_names = ['road_segment', 'lane']
     line_names = ['road_divider', 'lane_divider']
-    lmap = get_local_map(nusc_maps[map_name], center,
-                         50.0, poly_names, line_names)
+    lmap = get_local_map(nusc_maps[map_name], center, 50.0, poly_names, line_names)
     for name in poly_names:
         for la in lmap[name]:
             pts = (la - bx) / dx
-            plt.fill(pts[:, 1], pts[:, 0], c=(1.00, 0.50, 0.31), alpha=0.2)
+            plt.fill(pts[:, 1], pts[:, 0], c=(0.5, 0.5, 0.5), alpha=0.2)
     for la in lmap['road_divider']:
         pts = (la - bx) / dx
-        plt.plot(pts[:, 1], pts[:, 0], c=(0.0, 0.0, 1.0), alpha=0.5)
+        plt.plot(pts[:, 1], pts[:, 0], c=(0.0, 0.0, 0.0), alpha=0.2)
     for la in lmap['lane_divider']:
         pts = (la - bx) / dx
-        plt.plot(pts[:, 1], pts[:, 0], c=(159./255., 0.0, 1.0), alpha=0.5)
+        plt.plot(pts[:, 1], pts[:, 0], c=(0.0, 0.0, 0.0), alpha=0.2)
 
 
 def get_local_map(nmap, center, stretch, layer_names, line_names):

@@ -151,6 +151,13 @@ class NuscData(torch.utils.data.Dataset):
         intrins = []
         post_rots = []
         post_trans = []
+        samp1 = self.nusc.get('sample_data', rec['data']['LIDAR_TOP'])
+        pose_record = self.nusc.get('ego_pose', samp1['ego_pose_token'])
+        yaw = Quaternion(pose_record['rotation']).yaw_pitch_roll[0]
+        rot = Quaternion(scalar=np.cos(yaw / 2), vector=[0, 0, np.sin(yaw / 2)])  # .inverse
+        tran = np.array(pose_record['translation'])[:, None]
+        transform = np.vstack((np.hstack((rot.rotation_matrix, tran)), np.array([0, 0, 0, 1])))
+
         for cam in cams:
             samp = self.nusc.get('sample_data', rec['data'][cam])
             imgname = os.path.join(self.nusc.dataroot, samp['filename'])
@@ -158,10 +165,27 @@ class NuscData(torch.utils.data.Dataset):
             post_rot = torch.eye(2)
             post_tran = torch.zeros(2)
 
+            # go from world to egopose
+            pose_record = self.nusc.get('ego_pose', samp['ego_pose_token'])
+            rot = Quaternion(pose_record['rotation']).inverse
+            tran = -np.array(pose_record['translation'])[:, None]
+            transform1 = np.vstack(
+                (np.hstack((rot.rotation_matrix, rot.rotation_matrix @ tran)), np.array([0, 0, 0, 1])))
+
+            # # go from egopose to sensor
             sens = self.nusc.get('calibrated_sensor', samp['calibrated_sensor_token'])
             intrin = torch.Tensor(sens['camera_intrinsic'])
-            rot = torch.Tensor(Quaternion(sens['rotation']).rotation_matrix)
-            tran = torch.Tensor(sens['translation'])
+            rot = Quaternion(sens['rotation'])#.inverse
+            tran = np.array(sens['translation'])[:, None]
+            transform2 = np.vstack((np.hstack((rot.rotation_matrix, tran)), np.array([0, 0, 0, 1])))
+            transform2 = np.linalg.inv(transform2)
+
+            # transform3 = transform
+            # transform3 = transform1 @ transform
+            transform3 = transform2 @ transform1 @ transform
+            transform3 = np.linalg.inv(transform3)
+            rot = torch.Tensor(transform3[:3, :3])
+            tran = torch.Tensor(transform3[:3, 3])
 
             # augmentation (resize, crop, horizontal flip, rotate)
             resize, resize_dims, crop, flip, rotate = self.sample_augmentation()
@@ -198,8 +222,11 @@ class NuscData(torch.utils.data.Dataset):
         egopose = self.nusc.get('ego_pose',
                                 self.nusc.get('sample_data', rec['data']['LIDAR_TOP'])['ego_pose_token'])
         trans = -np.array(egopose['translation'])
-        rot = Quaternion(egopose['rotation']).inverse
+        # rot = Quaternion(egopose['rotation']).inverse
+        yaw = Quaternion(egopose['rotation']).yaw_pitch_roll[0]
+        rot = Quaternion(scalar=np.cos(yaw / 2), vector=[0, 0, np.sin(yaw / 2)]).inverse
         img = np.zeros((self.nx[0], self.nx[1]))
+        img1 = np.zeros((self.nx[0], self.nx[1]))
         for tok in rec['anns']:
             inst = self.nusc.get('sample_annotation', tok)
             # add category for lyft
@@ -214,9 +241,12 @@ class NuscData(torch.utils.data.Dataset):
                 (pts - self.bx[:2] + self.dx[:2]/2.) / self.dx[:2]
                 ).astype(np.int32)
             pts[:, [1, 0]] = pts[:, [0, 1]]
-            cv2.fillPoly(img, [pts], 1.0)
 
-        return torch.Tensor(img).long()
+            z = box.bottom_corners()[2, 0]
+            cv2.fillPoly(img, [pts], 1.0)
+            cv2.fillPoly(img1, [pts], z)
+
+        return torch.Tensor(img).long(), torch.Tensor(img1).float()
 
     def compute_static_label(self, rec, index):
         print(f'Generating static scene for dataset {self.mode} and index={index}')
@@ -386,7 +416,7 @@ class SegmentationData(NuscData):
 
         cams = self.choose_cams()
         imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
-        binimg = self.get_dynamic_label(rec)
+        binimg, z_position = self.get_dynamic_label(rec)
         if self.map_labels:
             static_label = self.get_static_label(rec, index)
         else:
@@ -398,13 +428,14 @@ class SegmentationData(NuscData):
             future_trajectory = []
 
         return imgs, rots, trans, intrins, post_rots, post_trans, binimg, static_label, future_egomotion, \
-               future_trajectory
+               future_trajectory, z_position
 
 
 class SequentialSegmentationData(SegmentationData):
     def __getitem__(self, index):
         list_imgs, list_rots, list_trans, list_intrins = [], [], [], []
         list_post_rots, list_post_trans, list_binimg, list_static_label, list_future_egomotion = [], [], [], [], []
+        list_z_position, list_recs = [], []
         cams = self.choose_cams()
 
         previous_rec = None
@@ -424,7 +455,7 @@ class SequentialSegmentationData(SegmentationData):
                     index_t = previous_index_t
 
             imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
-            binimg = self.get_dynamic_label(rec)
+            binimg, z_position = self.get_dynamic_label(rec)
             if self.map_labels:
                 static_label = self.get_static_label(rec, index_t)
             future_egomotion = self.get_future_egomotion(rec, index_t)
@@ -436,6 +467,8 @@ class SequentialSegmentationData(SegmentationData):
             list_post_rots.append(post_rots)
             list_post_trans.append(post_trans)
             list_binimg.append(binimg)
+            list_z_position.append(z_position)
+            list_recs.append(rec['token'])
             if self.map_labels:
                 list_static_label.append(static_label)
             list_future_egomotion.append(future_egomotion)
@@ -455,12 +488,13 @@ class SequentialSegmentationData(SegmentationData):
 
         list_post_rots, list_post_trans, list_binimg = torch.stack(list_post_rots), torch.stack(list_post_trans), \
                                                        torch.stack(list_binimg)
+        list_z_position = torch.stack(list_z_position)
         if self.map_labels:
             list_static_label = torch.stack(list_static_label)
         list_future_egomotion = torch.stack(list_future_egomotion)
 
         return (list_imgs, list_rots, list_trans, list_intrins, list_post_rots, list_post_trans, list_binimg,
-                list_static_label, list_future_egomotion, future_trajectory)
+                list_static_label, list_future_egomotion, future_trajectory, list_z_position, list_recs)
 
 
 def worker_rnd_init(x):
